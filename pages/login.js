@@ -32,7 +32,12 @@ export default function Login() {
     setLoading(false);
 
     if (res.ok) {
-      router.push('/dashboard');
+      // Redirect admin users to admin dashboard
+      if (username.toLowerCase() === 'admin') {
+        router.push('/admin');
+      } else {
+        router.push('/dashboard');
+      }
     } else {
       setMsg(j.error || 'Login failed');
     }

@@ -201,7 +201,22 @@ export default function Dashboard() {
             <div style={{ fontSize: '1.1rem' }}>
               <p style={{ margin: '0.5rem 0' }}>
                 <strong>Total Hours:</strong> {data.hours} hours
+                {data.adjustment !== 0 && (
+                  <span style={{
+                    marginLeft: '1rem',
+                    color: data.adjustment > 0 ? '#28a745' : '#dc3545',
+                    fontSize: '0.9rem'
+                  }}>
+                    ({data.adjustment > 0 ? '+' : ''}{data.adjustment} hours adjusted
+                    {data.adjustmentReason && `: ${data.adjustmentReason}`})
+                  </span>
+                )}
               </p>
+              {data.adjustment !== 0 && data.calculatedHours !== undefined && (
+                <p style={{ margin: '0.5rem 0', fontSize: '0.9rem', color: '#666' }}>
+                  <strong>Calculated Hours:</strong> {data.calculatedHours} hours
+                </p>
+              )}
               <p style={{ margin: '0.5rem 0' }}>
                 <strong>Hourly Rate:</strong> £{data.rate}/hour
               </p>

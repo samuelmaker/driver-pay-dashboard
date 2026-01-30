@@ -1,8 +1,7 @@
 import { verify } from 'jsonwebtoken';
-const { getDriverId } = require('../../lib/driver-mapping');
+const { getDriverId, getPayRate } = require('../../lib/driver-mapping');
 const { getDriverHoursForMonth } = require('../../lib/spoke-api');
-
-const PAY_RATE = parseFloat(process.env.PAY_RATE || '15');
+const { applyAdjustment } = require('../../lib/adjustments');
 
 function requireAuth(req) {
   const cookie = req.headers.cookie || '';
@@ -34,8 +33,14 @@ export default async function handler(req, res) {
     // Get data for this specific driver
     const driverData = allDriverHours[driverId] || { totalHours: 0, details: [] };
 
-    const hours = driverData.totalHours;
-    const pay = parseFloat((hours * PAY_RATE).toFixed(2));
+    // Get driver's pay rate
+    const payRate = getPayRate(session.username);
+
+    // Apply any manual adjustments from admin
+    const adjusted = applyAdjustment(session.username, targetMonth, driverData.totalHours);
+
+    const hours = adjusted.hours;
+    const pay = parseFloat((hours * payRate).toFixed(2));
 
     // Sort details by date (most recent first)
     const sortedDetails = driverData.details.sort((a, b) => {
@@ -49,7 +54,10 @@ export default async function handler(req, res) {
       driverId,
       username: session.username,
       hours,
-      rate: PAY_RATE,
+      calculatedHours: driverData.totalHours,
+      adjustment: adjusted.adjustment,
+      adjustmentReason: adjusted.reason,
+      rate: payRate,
       pay,
       details: sortedDetails,
       planCount: Object.keys(allDriverHours).length > 0 ? 'auto' : 0
