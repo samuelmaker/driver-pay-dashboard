@@ -1,8 +1,8 @@
-import fetch from 'node-fetch';
 import { verify } from 'jsonwebtoken';
+const { getDriverId } = require('../../lib/driver-mapping');
+const { getDriverHoursForMonth } = require('../../lib/spoke-api');
 
 const PAY_RATE = parseFloat(process.env.PAY_RATE || '15');
-const SPOKE_API_KEY = process.env.SPOKE_API_KEY;
 
 function requireAuth(req) {
   const cookie = req.headers.cookie || '';
@@ -15,39 +15,51 @@ export default async function handler(req, res) {
   const session = requireAuth(req);
   if (!session) return res.status(401).json({ error: 'not authenticated' });
 
-  const { driverId, month } = req.query;
-  if (!driverId) return res.status(400).json({ error: 'driverId required' });
+  // Get driver ID from session username
+  const driverId = getDriverId(session.username);
+  if (!driverId) {
+    return res.status(400).json({ error: `Driver ID not found for user: ${session.username}. Please contact administrator.` });
+  }
 
+  const { month } = req.query;
   const targetMonth = month || process.env.DEFAULT_MONTH || new Date().toISOString().slice(0,7);
-  const from = `${targetMonth}-01T00:00:00Z`;
-  // naive end: next month 1st
-  const [y,m] = targetMonth.split('-').map(Number);
-  const nextMonth = new Date(Date.UTC(y, m, 1)).toISOString().slice(0,10) + 'T00:00:00Z';
 
-  // Call Spoke API to get routes/shifts for driver within month
-  // NOTE: exact endpoint may differ; adjust after reviewing docs. Using placeholder /drivers/{id}/routes
-  if (!SPOKE_API_KEY) return res.status(500).json({ error: 'SPOKE_API_KEY not configured' });
+  try {
+    // Parse month into year and month numbers
+    const [year, monthNum] = targetMonth.split('-').map(Number);
 
-  const url = `https://api.dispatch.spoke.com/drivers/${driverId}/routes?from=${from}&to=${nextMonth}`;
-  const r = await fetch(url, { headers: { Authorization: `Bearer ${SPOKE_API_KEY}` } });
-  if (!r.ok) return res.status(502).json({ error: 'spoke api error', status: r.status });
-  const data = await r.json();
+    // Fetch all driver hours for this month (automatically fetches plans from Spoke)
+    const allDriverHours = await getDriverHoursForMonth(year, monthNum);
 
-  // Expect data.routes array with duration_seconds or start/end times
-  let totalSeconds = 0;
-  const details = (data.routes || []).map(rt => {
-    const seconds = rt.duration_seconds || (rt.end && rt.start ? (new Date(rt.end).getTime() - new Date(rt.start).getTime())/1000 : 0);
-    totalSeconds += seconds;
-    return {
-      id: rt.id,
-      date: rt.start,
-      hours: +(seconds/3600).toFixed(2),
-      raw: rt
-    };
-  });
+    // Get data for this specific driver
+    const driverData = allDriverHours[driverId] || { totalHours: 0, details: [] };
 
-  const hours = +(totalSeconds/3600).toFixed(2);
-  const pay = +(hours * PAY_RATE).toFixed(2);
+    const hours = driverData.totalHours;
+    const pay = parseFloat((hours * PAY_RATE).toFixed(2));
 
-  return res.json({ month: targetMonth, driverId, hours, rate: PAY_RATE, pay, details });
+    // Sort details by date (most recent first)
+    const sortedDetails = driverData.details.sort((a, b) => {
+      const dateA = a.date ? new Date(a.date).getTime() : 0;
+      const dateB = b.date ? new Date(b.date).getTime() : 0;
+      return dateB - dateA;
+    });
+
+    return res.json({
+      month: targetMonth,
+      driverId,
+      username: session.username,
+      hours,
+      rate: PAY_RATE,
+      pay,
+      details: sortedDetails,
+      planCount: Object.keys(allDriverHours).length > 0 ? 'auto' : 0
+    });
+
+  } catch (error) {
+    console.error('Error fetching driver pay data:', error);
+    return res.status(500).json({
+      error: 'Failed to fetch pay data',
+      message: error.message
+    });
+  }
 }

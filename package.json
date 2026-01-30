@@ -1,11 +1,13 @@
 {
   "name": "driver-pay-dashboard",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
+  "description": "Driver pay dashboard with Spoke API integration",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "generate-pins": "node scripts/generate-pins.js",
     "test": "node -e \"console.log('no tests yet')\""
   },
   "dependencies": {
@@ -13,6 +15,6 @@
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "jsonwebtoken": "9.0.0",
-    "node-fetch": "3.4.1"
+    "node-fetch": "2.7.0"
   }
 }

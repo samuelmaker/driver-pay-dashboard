@@ -1,0 +1,61 @@
+/**
+ * Registry of plan IDs organized by month
+ *
+ * Add plan IDs here as they are created each month.
+ * Format: YYYY-MM as key, array of plan IDs as value
+ *
+ * To add a new month's plans:
+ * 1. Create plans in Spoke for the month
+ * 2. Add the plan IDs to this registry
+ * 3. Deploy the updated code
+ */
+
+const PLAN_REGISTRY = {
+  '2026-01': [
+    // January 2026 plans
+    // Example: 'plans/abc123',
+    // Example: 'plans/def456',
+  ],
+  '2026-02': [
+    // February 2026 plans
+  ],
+  // Add more months as needed
+};
+
+/**
+ * Get all plan IDs for a specific month
+ * @param {string} month - Month in format YYYY-MM
+ * @returns {Array<string>} Array of plan IDs for that month
+ */
+function getPlansForMonth(month) {
+  return PLAN_REGISTRY[month] || [];
+}
+
+/**
+ * Add a plan ID to a month
+ * @param {string} month - Month in format YYYY-MM
+ * @param {string} planId - Plan ID in format "plans/xxx"
+ */
+function addPlanToMonth(month, planId) {
+  if (!PLAN_REGISTRY[month]) {
+    PLAN_REGISTRY[month] = [];
+  }
+  if (!PLAN_REGISTRY[month].includes(planId)) {
+    PLAN_REGISTRY[month].push(planId);
+  }
+}
+
+/**
+ * Get all months that have plans
+ * @returns {Array<string>} Array of month strings (YYYY-MM)
+ */
+function getAvailableMonths() {
+  return Object.keys(PLAN_REGISTRY).filter(month => PLAN_REGISTRY[month].length > 0);
+}
+
+module.exports = {
+  PLAN_REGISTRY,
+  getPlansForMonth,
+  addPlanToMonth,
+  getAvailableMonths
+};
