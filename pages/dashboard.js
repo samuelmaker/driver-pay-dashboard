@@ -17,6 +17,14 @@ function formatDate(dateString) {
   });
 }
 
+function formatTime(timestampSeconds) {
+  if (!timestampSeconds) return '-';
+  return new Date(timestampSeconds * 1000).toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
 function getMonthOptions() {
   const options = [];
   const now = new Date();

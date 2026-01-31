@@ -17,6 +17,14 @@ function formatDate(dateString) {
   });
 }
 
+function formatTime(timestampSeconds) {
+  if (!timestampSeconds) return '-';
+  return new Date(timestampSeconds * 1000).toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
 function getMonthOptions() {
   const options = [];
   const now = new Date();
@@ -533,13 +541,15 @@ export default function AdminDashboard() {
                                 <thead>
                                   <tr>
                                     <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd', color: '#666' }}>Date</th>
+                                    <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd', color: '#666' }}>Start</th>
+                                    <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd', color: '#666' }}>End</th>
                                     <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd', color: '#666' }}>Hours</th>
                                     <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd', color: '#666' }}>Route</th>
                                   </tr>
                                 </thead>
                                 <tbody>
                                   {driver.routes
-                                    .sort((a, b) => new Date(b.date) - new Date(a.date))
+                                    .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
                                     .map((route, rIdx) => {
                                       const spokeUrl = getSpokeUrl(route.id, route.planId);
                                       return (
@@ -548,6 +558,16 @@ export default function AdminDashboard() {
                                         }}>
                                           <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
                                             {formatDate(route.date)}
+                                          </td>
+                                          <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                                            {formatTime(route.startedAt)}
+                                          </td>
+                                          <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                                            {route.status === 'in_progress' ? (
+                                              <span style={{ color: '#f0ad4e' }}>-</span>
+                                            ) : (
+                                              formatTime(route.completedAt)
+                                            )}
                                           </td>
                                           <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
                                             {route.status === 'in_progress' ? (

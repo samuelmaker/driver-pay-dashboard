@@ -11,21 +11,6 @@ The Driver Pay Dashboard now includes comprehensive admin features:
 
 ## Admin Access
 
-### Setup
-
-1. **Add admin to PIN_STORE_JSON:**
-   ```env
-   PIN_STORE_JSON={"admin":"999999","samuel":"123456",...}
-   ```
-
-2. **Login as admin:**
-   - Username: `admin`
-   - PIN: Your chosen 6-digit PIN
-
-3. **Auto-redirect:**
-   - Admin users are automatically redirected to `/admin`
-   - Regular drivers go to `/dashboard`
-
 ## Admin Dashboard Features
 
 ### View All Drivers
