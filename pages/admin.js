@@ -25,6 +25,23 @@ function formatTime(timestampSeconds) {
   });
 }
 
+function formatDayKeyLikeRouteDate(dayKey) {
+  if (!dayKey || typeof dayKey !== 'string') return '-';
+  try {
+    // Use midday UTC to avoid edge cases around DST shifting the local date.
+    const d = new Date(`${dayKey}T12:00:00.000Z`);
+    if (Number.isNaN(d.getTime())) return '-';
+    return d.toLocaleDateString('en-GB', {
+      timeZone: 'Europe/London',
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short'
+    });
+  } catch (e) {
+    return '-';
+  }
+}
+
 function getMonthOptions() {
   const options = [];
   const now = new Date();
@@ -48,7 +65,24 @@ export default function AdminDashboard() {
   const [expandedDriver, setExpandedDriver] = useState(null);
   const [adjustmentHours, setAdjustmentHours] = useState('');
   const [adjustmentReason, setAdjustmentReason] = useState('');
+  const [selectedDayKey, setSelectedDayKey] = useState('');
   const [selectedMonth, setSelectedMonth] = useState('');
+
+  function getDayKeyFromDateString(dateString) {
+    if (!dateString) return '';
+    try {
+      const d = new Date(dateString);
+      if (Number.isNaN(d.getTime())) return '';
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Europe/London',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).format(d);
+    } catch (e) {
+      return '';
+    }
+  }
 
   useEffect(() => {
     const checkAuthAndLoad = async () => {
@@ -88,14 +122,14 @@ export default function AdminDashboard() {
   }
 
   async function submitAdjustment() {
-    if (!selectedDriver || adjustmentHours === '') return;
+    if (!selectedDriver || !selectedDayKey || adjustmentHours === '') return;
 
     const res = await fetch('/api/admin/adjust-hours', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         username: selectedDriver.username,
-        month: data.month,
+        dayKey: selectedDayKey,
         adjustment: parseFloat(adjustmentHours),
         reason: adjustmentReason
       })
@@ -103,6 +137,7 @@ export default function AdminDashboard() {
 
     if (res.ok) {
       setSelectedDriver(null);
+      setSelectedDayKey('');
       setAdjustmentHours('');
       setAdjustmentReason('');
       loadAllDrivers(selectedMonth);
@@ -151,9 +186,29 @@ export default function AdminDashboard() {
   function downloadDriverCSV(driver) {
     if (!driver || !driver.routes) return;
 
-    const formatHours = (hours) => {
-      if (hours === null || hours === undefined) return 'In Progress';
-      return hours.toFixed(2);
+    const csvCell = (value) => {
+      const s = value === null || value === undefined ? '' : String(value);
+      return `"${s.replace(/"/g, '""')}"`;
+    };
+
+    const formatMoney = (amount) => {
+      const n = Number(amount || 0);
+      const sign = n < 0 ? '-' : '';
+      return `${sign}£${Math.abs(n).toFixed(2)}`;
+    };
+
+    const formatHoursForExport = (hours, status) => {
+      if (status === 'not_started') return 'Not Started';
+      if (status === 'in_progress') return 'In Progress';
+      if (hours === null || hours === undefined || Number.isNaN(Number(hours))) return 'In Progress';
+      return Number(hours).toFixed(2);
+    };
+
+    const routeAmount = (hours, status, rate) => {
+      if (status !== 'completed') return 0;
+      const h = Number(hours);
+      if (!Number.isFinite(h)) return 0;
+      return h * Number(rate || 0);
     };
 
     const rows = [
@@ -161,23 +216,35 @@ export default function AdminDashboard() {
       [''],
       ['Summary'],
       ['Calculated Hours', driver.calculatedHours.toFixed(2)],
-      ['Adjustment', driver.adjustment !== 0 ? `${driver.adjustment.toFixed(2)} (${driver.adjustmentReason || 'No reason'})` : 'None'],
+      ['Adjustment Hours', driver.adjustment !== 0 ? driver.adjustment.toFixed(2) : '0.00'],
+      ['Adjustment Amount', driver.adjustment !== 0 ? formatMoney(driver.adjustment * Number(driver.rate || 0)) : formatMoney(0)],
+      ['Adjustment Reason', driver.adjustmentReason || ''],
       ['Total Hours', driver.hours.toFixed(2)],
       ['Hourly Rate', `£${driver.rate}`],
       ['Total Pay', `£${driver.pay.toFixed(2)}`],
       [''],
       ['Route Breakdown'],
-      ['Date', 'Hours', 'Route'],
+      ['Date', 'Hours', 'Amount (£)', 'Route'],
       ...driver.routes
         .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
-        .map(r => [
+        .map(r => ([
           formatDate(r.date),
-          formatHours(r.hours),
+          formatHoursForExport(r.hours, r.status),
+          formatMoney(routeAmount(r.hours, r.status, driver.rate)),
           r.routeTitle || (r.id ? r.id.replace('routes/', '') : 'Unknown')
-        ])
+        ])),
     ];
 
-    const csvContent = rows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+    if (Number(driver.adjustment || 0) !== 0) {
+      rows.push([
+        'Adjustment',
+        Number(driver.adjustment || 0).toFixed(2),
+        formatMoney(Number(driver.adjustment || 0) * Number(driver.rate || 0)),
+        driver.adjustmentReason || ''
+      ]);
+    }
+
+    const csvContent = rows.map(row => row.map(csvCell).join(',')).join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -192,9 +259,24 @@ export default function AdminDashboard() {
   function downloadDriverPDF(driver) {
     if (!driver || !driver.routes) return;
 
-    const formatHours = (hours) => {
-      if (hours === null || hours === undefined) return 'In Progress';
-      return hours.toFixed(2);
+    const formatMoney = (amount) => {
+      const n = Number(amount || 0);
+      const sign = n < 0 ? '-' : '';
+      return `${sign}£${Math.abs(n).toFixed(2)}`;
+    };
+
+    const formatHoursForExport = (hours, status) => {
+      if (status === 'not_started') return 'Not Started';
+      if (status === 'in_progress') return 'In Progress';
+      if (hours === null || hours === undefined || Number.isNaN(Number(hours))) return 'In Progress';
+      return Number(hours).toFixed(2);
+    };
+
+    const routeAmount = (hours, status, rate) => {
+      if (status !== 'completed') return 0;
+      const h = Number(hours);
+      if (!Number.isFinite(h)) return 0;
+      return h * Number(rate || 0);
     };
 
     const adjustmentColor = driver.adjustment > 0 ? '#28a745' : driver.adjustment < 0 ? '#dc3545' : '#666';
@@ -204,10 +286,29 @@ export default function AdminDashboard() {
       .map(r => `
         <tr>
           <td>${formatDate(r.date)}</td>
-          <td>${formatHours(r.hours)}</td>
+          <td>${formatHoursForExport(r.hours, r.status)}</td>
+          <td>${formatMoney(routeAmount(r.hours, r.status, driver.rate))}</td>
           <td>${r.routeTitle || (r.id ? r.id.replace('routes/', '') : 'Unknown')}</td>
         </tr>
       `).join('');
+
+    const adjustmentRows = Object.entries(driver.adjustmentsByDay || {})
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([dayKey, adj]) => {
+        const hours = Number(adj?.hours || 0);
+        if (!Number.isFinite(hours) || hours === 0) return '';
+        const prettyDate = formatDayKeyLikeRouteDate(dayKey);
+        return `
+          <tr>
+            <td>${prettyDate}</td>
+            <td>${hours.toFixed(2)}</td>
+            <td>${formatMoney(hours * Number(driver.rate || 0))}</td>
+            <td>Adjustment (${prettyDate})${adj?.reason ? ` - ${adj.reason}` : ''}</td>
+          </tr>
+        `;
+      })
+      .filter(Boolean)
+      .join('');
 
     const htmlContent = `
       <html>
@@ -250,11 +351,13 @@ export default function AdminDashboard() {
               <tr>
                 <th>Date</th>
                 <th>Hours</th>
+                <th>Amount (£)</th>
                 <th>Route</th>
               </tr>
             </thead>
             <tbody>
               ${routeRows}
+              ${adjustmentRows}
             </tbody>
           </table>
         </body>
@@ -545,6 +648,7 @@ export default function AdminDashboard() {
                                     <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd', color: '#666' }}>End</th>
                                     <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd', color: '#666' }}>Hours</th>
                                     <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd', color: '#666' }}>Route</th>
+                                    <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd', color: '#666' }}>Actions</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -552,6 +656,8 @@ export default function AdminDashboard() {
                                     .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
                                     .map((route, rIdx) => {
                                       const spokeUrl = getSpokeUrl(route.id, route.planId);
+                                      const dayKey = getDayKeyFromDateString(route.date);
+                                      const existingDayAdj = (dayKey && driver.adjustmentsByDay && driver.adjustmentsByDay[dayKey]) ? driver.adjustmentsByDay[dayKey] : null;
                                       return (
                                         <tr key={route.id || rIdx} style={{
                                           backgroundColor: rIdx % 2 === 0 ? '#fff' : '#f8fafc'
@@ -577,6 +683,12 @@ export default function AdminDashboard() {
                                             ) : (
                                               route.hours !== null ? route.hours.toFixed(2) : '-'
                                             )}
+                                            {existingDayAdj && Number(existingDayAdj.hours || 0) !== 0 && (
+                                              <div style={{ fontSize: '0.8rem', color: existingDayAdj.hours > 0 ? '#28a745' : '#dc3545' }}>
+                                                Adj: {existingDayAdj.hours > 0 ? '+' : ''}{Number(existingDayAdj.hours).toFixed(2)}
+                                                {existingDayAdj.reason ? ` (${existingDayAdj.reason})` : ''}
+                                              </div>
+                                            )}
                                           </td>
                                           <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
                                             {spokeUrl ? (
@@ -601,6 +713,32 @@ export default function AdminDashboard() {
                                                 {route.id}
                                               </span>
                                             )}
+                                          </td>
+                                          <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (!dayKey) {
+                                                  alert('Could not determine date for this route.');
+                                                  return;
+                                                }
+                                                setSelectedDriver(driver);
+                                                setSelectedDayKey(dayKey);
+                                                setAdjustmentHours(existingDayAdj ? String(existingDayAdj.hours) : '');
+                                                setAdjustmentReason(existingDayAdj ? (existingDayAdj.reason || '') : '');
+                                              }}
+                                              style={{
+                                                padding: '0.25rem 0.5rem',
+                                                fontSize: '0.8rem',
+                                                color: '#fff',
+                                                backgroundColor: '#007bff',
+                                                border: 'none',
+                                                borderRadius: '4px',
+                                                cursor: 'pointer'
+                                              }}
+                                            >
+                                              Adjust
+                                            </button>
                                           </td>
                                         </tr>
                                       );
@@ -643,15 +781,15 @@ export default function AdminDashboard() {
           }}>
             <h3 style={{ marginTop: 0 }}>Adjust Hours for {selectedDriver.displayName}</h3>
             <p style={{ color: '#666' }}>
-              <strong>Month:</strong> {data.month}<br />
-              <strong>Current calculated hours:</strong> {selectedDriver.calculatedHours.toFixed(2)}
-              {selectedDriver.adjustment !== 0 && (
+              <strong>Date:</strong> {selectedDayKey || '-'}<br />
+              {selectedDayKey && selectedDriver.adjustmentsByDay && selectedDriver.adjustmentsByDay[selectedDayKey] && (
                 <>
+                  <strong>Current adjustment:</strong> {selectedDriver.adjustmentsByDay[selectedDayKey].hours > 0 ? '+' : ''}{Number(selectedDriver.adjustmentsByDay[selectedDayKey].hours).toFixed(2)}
+                  {selectedDriver.adjustmentsByDay[selectedDayKey].reason ? ` (${selectedDriver.adjustmentsByDay[selectedDayKey].reason})` : ''}
                   <br />
-                  <strong>Current adjustment:</strong> {selectedDriver.adjustment > 0 ? '+' : ''}{selectedDriver.adjustment.toFixed(2)}
-                  {selectedDriver.adjustmentReason && ` (${selectedDriver.adjustmentReason})`}
                 </>
               )}
+              <small>Adjustments apply to this specific date (YYYY-MM-DD).</small>
             </p>
 
             <label style={{ display: 'block', marginBottom: '1rem' }}>
@@ -673,7 +811,7 @@ export default function AdminDashboard() {
                 }}
               />
               <small style={{ color: '#666' }}>
-                This replaces any existing adjustment. Use positive numbers to add hours, negative to subtract. Enter 0 to remove adjustment.
+                This replaces any existing adjustment for this date. Use positive numbers to add hours, negative to subtract. Enter 0 to remove adjustment.
               </small>
             </label>
 
@@ -699,17 +837,17 @@ export default function AdminDashboard() {
             <div style={{ display: 'flex', gap: '1rem' }}>
               <button
                 onClick={submitAdjustment}
-                disabled={adjustmentHours === ''}
+                disabled={adjustmentHours === '' || !selectedDayKey}
                 style={{
                   flex: 1,
                   padding: '0.75rem',
                   fontSize: '1rem',
                   fontWeight: '600',
                   color: '#fff',
-                  backgroundColor: adjustmentHours === '' ? '#ccc' : '#28a745',
+                  backgroundColor: (adjustmentHours === '' || !selectedDayKey) ? '#ccc' : '#28a745',
                   border: 'none',
                   borderRadius: '4px',
-                  cursor: adjustmentHours === '' ? 'not-allowed' : 'pointer'
+                  cursor: (adjustmentHours === '' || !selectedDayKey) ? 'not-allowed' : 'pointer'
                 }}
               >
                 Save Adjustment
@@ -717,6 +855,7 @@ export default function AdminDashboard() {
               <button
                 onClick={() => {
                   setSelectedDriver(null);
+                  setSelectedDayKey('');
                   setAdjustmentHours('');
                   setAdjustmentReason('');
                 }}

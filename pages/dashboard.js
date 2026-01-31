@@ -25,6 +25,39 @@ function formatTime(timestampSeconds) {
   });
 }
 
+function getDayKeyFromDateString(dateString) {
+  if (!dateString) return '';
+  try {
+    const d = new Date(dateString);
+    if (Number.isNaN(d.getTime())) return '';
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/London',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(d);
+  } catch (e) {
+    return '';
+  }
+}
+
+function formatDayKeyLikeRouteDate(dayKey) {
+  if (!dayKey || typeof dayKey !== 'string') return '-';
+  try {
+    // Use midday UTC to avoid edge cases around DST shifting the local date.
+    const d = new Date(`${dayKey}T12:00:00.000Z`);
+    if (Number.isNaN(d.getTime())) return '-';
+    return d.toLocaleDateString('en-GB', {
+      timeZone: 'Europe/London',
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short'
+    });
+  } catch (e) {
+    return '-';
+  }
+}
+
 function getMonthOptions() {
   const options = [];
   const now = new Date();
@@ -86,25 +119,64 @@ export default function Dashboard() {
   function downloadCSV() {
     if (!data || !data.details) return;
 
-    const formatHours = (hours) => {
-      if (hours === null || hours === undefined) return 'In Progress';
-      return hours;
+    const rate = Number(data.rate || 0);
+
+    const csvCell = (value) => {
+      const s = value === null || value === undefined ? '' : String(value);
+      return `"${s.replace(/"/g, '""')}"`;
+    };
+
+    const formatMoney = (amount) => {
+      const n = Number(amount || 0);
+      const sign = n < 0 ? '-' : '';
+      return `${sign}£${Math.abs(n).toFixed(2)}`;
+    };
+
+    const formatHoursForExport = (hours, status) => {
+      if (status === 'not_started') return 'Not Started';
+      if (status === 'in_progress') return 'In Progress';
+      if (hours === null || hours === undefined || Number.isNaN(Number(hours))) return 'In Progress';
+      return Number(hours).toFixed(2);
+    };
+
+    const routeAmount = (hours, routeStatus) => {
+      if (routeStatus !== 'completed') return 0;
+      const h = Number(hours);
+      if (!Number.isFinite(h)) return 0;
+      return h * rate;
     };
 
     const rows = [
-      ['Date', 'Hours', 'Route'],
-      ...data.details.map(d => [
-        `"${formatDate(d.date)}"`,
-        `"${formatHours(d.hours)}"`,
-        `"${d.routeTitle || (d.id ? d.id.replace('routes/', '') : 'Unknown')}"`
-      ]),
-      ['', '', ''],
-      ['Total Hours', data.hours || 0, ''],
-      ['Hourly Rate', `£${data.rate || 0}`, ''],
-      ['Total Pay', `£${data.pay || 0}`, '']
+      ['Date', 'Hours', 'Amount (£)', 'Route'],
+      ...data.details.map(d => {
+        const amount = routeAmount(d.hours, d.status);
+        return [
+          formatDate(d.date),
+          formatHoursForExport(d.hours, d.status),
+          formatMoney(amount),
+          d.routeTitle || (d.id ? d.id.replace('routes/', '') : 'Unknown')
+        ];
+      }),
     ];
 
-    const csvContent = rows.map(row => row.join(',')).join('\n');
+    if (Number(data.adjustment || 0) !== 0) {
+      const adjustmentHours = Number(data.adjustment || 0);
+      const adjustmentAmount = adjustmentHours * rate;
+      rows.push([
+        'Adjustment',
+        adjustmentHours.toFixed(2),
+        formatMoney(adjustmentAmount),
+        data.adjustmentReason || ''
+      ]);
+    }
+
+    rows.push(['', '', '', '']);
+    rows.push(['Calculated Hours', Number(data.calculatedHours || 0).toFixed(2), '', '']);
+    rows.push(['Total Hours', Number(data.hours || 0).toFixed(2), '', '']);
+    rows.push(['Hourly Rate (£/hr)', rate.toFixed(2), '', '']);
+    rows.push(['Total Pay', formatMoney(data.pay || 0), '', '']);
+
+    const csvContent = rows.map(row => row.map(csvCell).join(',')).join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -119,9 +191,26 @@ export default function Dashboard() {
   function downloadPDF() {
     if (!data || !data.details) return;
 
-    const formatHours = (hours) => {
-      if (hours === null || hours === undefined) return 'In Progress';
-      return hours;
+    const rate = Number(data.rate || 0);
+
+    const formatMoney = (amount) => {
+      const n = Number(amount || 0);
+      const sign = n < 0 ? '-' : '';
+      return `${sign}£${Math.abs(n).toFixed(2)}`;
+    };
+
+    const formatHoursForExport = (hours, status) => {
+      if (status === 'not_started') return 'Not Started';
+      if (status === 'in_progress') return 'In Progress';
+      if (hours === null || hours === undefined || Number.isNaN(Number(hours))) return 'In Progress';
+      return Number(hours).toFixed(2);
+    };
+
+    const routeAmount = (hours, status) => {
+      if (status !== 'completed') return 0;
+      const h = Number(hours);
+      if (!Number.isFinite(h)) return 0;
+      return h * rate;
     };
 
     const formatDateSafe = (dateStr) => {
@@ -136,10 +225,29 @@ export default function Dashboard() {
     const routeRows = data.details.map(d => `
       <tr>
         <td>${formatDateSafe(d.date)}</td>
-        <td>${formatHours(d.hours)}</td>
+        <td>${formatHoursForExport(d.hours, d.status)}</td>
+        <td>${formatMoney(routeAmount(d.hours, d.status))}</td>
         <td>${d.routeTitle || (d.id ? d.id.replace('routes/', '') : 'Unknown')}</td>
       </tr>
     `).join('');
+
+    const adjustmentRows = Object.entries(data.adjustmentsByDay || {})
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([dayKey, adj]) => {
+        const hours = Number(adj?.hours || 0);
+        if (!Number.isFinite(hours) || hours === 0) return '';
+        const prettyDate = formatDayKeyLikeRouteDate(dayKey);
+        return `
+          <tr>
+            <td>${prettyDate}</td>
+            <td>${hours.toFixed(2)}</td>
+            <td>${formatMoney(hours * rate)}</td>
+            <td>Adjustment (${prettyDate})${adj?.reason ? ` - ${adj.reason}` : ''}</td>
+          </tr>
+        `;
+      })
+      .filter(Boolean)
+      .join('');
 
     const htmlContent = `
       <html>
@@ -174,11 +282,13 @@ export default function Dashboard() {
               <tr>
                 <th>Date</th>
                 <th>Hours</th>
+                <th>Amount (£)</th>
                 <th>Route</th>
               </tr>
             </thead>
             <tbody>
               ${routeRows}
+              ${adjustmentRows}
             </tbody>
           </table>
         </body>

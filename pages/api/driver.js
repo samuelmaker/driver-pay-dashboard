@@ -1,7 +1,7 @@
 import { verify } from 'jsonwebtoken';
 const { getDriverId, getPayRate } = require('../../lib/driver-mapping');
 const { getDriverHoursForMonth } = require('../../lib/spoke-api');
-const { applyAdjustment } = require('../../lib/adjustments');
+const { applyAdjustmentsForMonth } = require('../../lib/adjustments');
 
 function requireAuth(req) {
   const cookie = req.headers.cookie || '';
@@ -37,7 +37,7 @@ export default async function handler(req, res) {
     const payRate = getPayRate(session.username);
 
     // Apply any manual adjustments from admin
-    const adjusted = applyAdjustment(session.username, targetMonth, driverData.totalHours);
+    const adjusted = applyAdjustmentsForMonth(session.username, targetMonth, driverData.totalHours, driverData.details);
 
     const hours = adjusted.hours;
     const pay = parseFloat((hours * payRate).toFixed(2));
@@ -55,8 +55,9 @@ export default async function handler(req, res) {
       username: session.username,
       hours,
       calculatedHours: driverData.totalHours,
-      adjustment: adjusted.adjustment,
-      adjustmentReason: adjusted.reason,
+      adjustment: adjusted.totalAdjustment,
+      adjustmentReason: Object.keys(adjusted.adjustmentsByDay || {}).length > 1 ? 'Multiple adjustments' : (Object.values(adjusted.adjustmentsByDay || {})[0]?.reason || ''),
+      adjustmentsByDay: adjusted.adjustmentsByDay || {},
       rate: payRate,
       pay,
       details: sortedDetails,

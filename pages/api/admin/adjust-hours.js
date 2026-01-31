@@ -20,21 +20,21 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Admin access required' });
   }
 
-  const { username, month, adjustment, reason } = req.body;
+  const { username, dayKey, adjustment, reason } = req.body;
 
-  if (!username || !month || adjustment === undefined) {
+  if (!username || !dayKey || adjustment === undefined) {
     return res.status(400).json({
-      error: 'Missing required fields: username, month, adjustment'
+      error: 'Missing required fields: username, dayKey, adjustment'
     });
   }
 
   try {
-    const success = setAdjustment(username, month, parseFloat(adjustment), reason || '');
+    const success = setAdjustment(username, dayKey, parseFloat(adjustment), reason || '');
 
     if (success) {
       return res.json({
         success: true,
-        message: `Adjustment of ${adjustment} hours set for ${username} in ${month}`
+        message: `Adjustment of ${adjustment} hours set for ${username} on ${dayKey}`
       });
     } else {
       return res.status(500).json({ error: 'Failed to save adjustment' });
