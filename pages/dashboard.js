@@ -76,19 +76,24 @@ export default function Dashboard() {
   }
 
   function downloadCSV() {
-    if (!data) return;
+    if (!data || !data.details) return;
+
+    const formatHours = (hours) => {
+      if (hours === null || hours === undefined) return 'In Progress';
+      return hours;
+    };
 
     const rows = [
       ['Date', 'Hours', 'Route'],
       ...data.details.map(d => [
-        formatDate(d.date),
-        d.hours,
-        d.routeTitle || d.id.replace('routes/', '')
+        `"${formatDate(d.date)}"`,
+        `"${formatHours(d.hours)}"`,
+        `"${d.routeTitle || (d.id ? d.id.replace('routes/', '') : 'Unknown')}"`
       ]),
       ['', '', ''],
-      ['Total Hours', data.hours, ''],
-      ['Hourly Rate', `£${data.rate}`, ''],
-      ['Total Pay', `£${data.pay}`, '']
+      ['Total Hours', data.hours || 0, ''],
+      ['Hourly Rate', `£${data.rate || 0}`, ''],
+      ['Total Pay', `£${data.pay || 0}`, '']
     ];
 
     const csvContent = rows.map(row => row.join(',')).join('\n');
@@ -97,15 +102,38 @@ export default function Dashboard() {
     const a = document.createElement('a');
     a.href = url;
     a.download = `pay-statement-${data.month}-${username}.csv`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
 
   function downloadPDF() {
-    if (!data) return;
+    if (!data || !data.details) return;
 
-    const printWindow = window.open('', '', 'width=800,height=600');
-    printWindow.document.write(`
+    const formatHours = (hours) => {
+      if (hours === null || hours === undefined) return 'In Progress';
+      return hours;
+    };
+
+    const formatDateSafe = (dateStr) => {
+      if (!dateStr) return '-';
+      try {
+        return new Date(dateStr).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+      } catch (e) {
+        return '-';
+      }
+    };
+
+    const routeRows = data.details.map(d => `
+      <tr>
+        <td>${formatDateSafe(d.date)}</td>
+        <td>${formatHours(d.hours)}</td>
+        <td>${d.routeTitle || (d.id ? d.id.replace('routes/', '') : 'Unknown')}</td>
+      </tr>
+    `).join('');
+
+    const htmlContent = `
       <html>
         <head>
           <title>Pay Statement - ${data.month}</title>
@@ -123,13 +151,13 @@ export default function Dashboard() {
           <h1>Driver Pay Statement</h1>
           <p><strong>Driver:</strong> ${username}</p>
           <p><strong>Period:</strong> ${data.month}</p>
-          <p><strong>Generated:</strong> ${new Date().toLocaleDateString()}</p>
+          <p><strong>Generated:</strong> ${new Date().toLocaleDateString('en-GB')}</p>
 
           <div class="summary">
             <h2>Summary</h2>
-            <p><strong>Total Hours:</strong> ${data.hours}</p>
-            <p><strong>Hourly Rate:</strong> £${data.rate}</p>
-            <p><strong>Total Pay:</strong> £${data.pay}</p>
+            <p><strong>Total Hours:</strong> ${data.hours || 0}</p>
+            <p><strong>Hourly Rate:</strong> £${data.rate || 0}</p>
+            <p><strong>Total Pay:</strong> £${data.pay || 0}</p>
           </div>
 
           <h3>Detailed Breakdown</h3>
@@ -142,24 +170,25 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              ${data.details.map(d => `
-                <tr>
-                  <td>${new Date(d.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}</td>
-                  <td>${d.hours}</td>
-                  <td>${d.routeTitle || d.id.replace('routes/', '')}</td>
-                </tr>
-              `).join('')}
+              ${routeRows}
             </tbody>
           </table>
         </body>
       </html>
-    `);
+    `;
+
+    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    if (!printWindow) {
+      alert('Please allow pop-ups to download PDF');
+      return;
+    }
+    printWindow.document.write(htmlContent);
     printWindow.document.close();
     printWindow.focus();
     setTimeout(() => {
       printWindow.print();
       printWindow.close();
-    }, 250);
+    }, 500);
   }
 
   if (!username) {

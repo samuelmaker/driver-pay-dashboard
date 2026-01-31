@@ -114,18 +114,18 @@ export default function AdminDashboard() {
     const rows = [
       ['Driver', 'Username', 'Calculated Hours', 'Adjustment', 'Adjustment Reason', 'Total Hours', 'Rate (£/hr)', 'Total Pay (£)', 'Routes'],
       ...data.drivers.map(d => [
-        d.displayName,
-        d.username,
-        d.calculatedHours.toFixed(2),
+        d.displayName || '',
+        d.username || '',
+        (d.calculatedHours || 0).toFixed(2),
         d.adjustment !== 0 ? d.adjustment.toFixed(2) : '0',
         d.adjustmentReason || '',
-        d.hours.toFixed(2),
-        d.rate,
-        d.pay.toFixed(2),
-        d.routeCount
+        (d.hours || 0).toFixed(2),
+        d.rate || 0,
+        (d.pay || 0).toFixed(2),
+        d.routeCount || 0
       ]),
       ['', '', '', '', '', '', '', '', ''],
-      ['TOTALS', '', '', '', '', data.totalHours.toFixed(2), '', data.totalPay.toFixed(2), '']
+      ['TOTALS', '', '', '', '', (data.totalHours || 0).toFixed(2), '', (data.totalPay || 0).toFixed(2), '']
     ];
 
     const csvContent = rows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
@@ -134,12 +134,19 @@ export default function AdminDashboard() {
     const a = document.createElement('a');
     a.href = url;
     a.download = `all-drivers-pay-${data.month}.csv`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
 
   function downloadDriverCSV(driver) {
     if (!driver || !driver.routes) return;
+
+    const formatHours = (hours) => {
+      if (hours === null || hours === undefined) return 'In Progress';
+      return hours.toFixed(2);
+    };
 
     const rows = [
       [`Pay Statement for ${driver.displayName} - ${data.month}`],
@@ -154,11 +161,11 @@ export default function AdminDashboard() {
       ['Route Breakdown'],
       ['Date', 'Hours', 'Route'],
       ...driver.routes
-        .sort((a, b) => new Date(b.date) - new Date(a.date))
+        .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
         .map(r => [
           formatDate(r.date),
-          r.hours.toFixed(2),
-          r.routeTitle || r.id.replace('routes/', '')
+          formatHours(r.hours),
+          r.routeTitle || (r.id ? r.id.replace('routes/', '') : 'Unknown')
         ])
     ];
 
@@ -168,15 +175,33 @@ export default function AdminDashboard() {
     const a = document.createElement('a');
     a.href = url;
     a.download = `${driver.username}-pay-${data.month}.csv`;
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
 
   function downloadDriverPDF(driver) {
     if (!driver || !driver.routes) return;
 
-    const printWindow = window.open('', '', 'width=800,height=600');
-    printWindow.document.write(`
+    const formatHours = (hours) => {
+      if (hours === null || hours === undefined) return 'In Progress';
+      return hours.toFixed(2);
+    };
+
+    const adjustmentColor = driver.adjustment > 0 ? '#28a745' : driver.adjustment < 0 ? '#dc3545' : '#666';
+
+    const routeRows = driver.routes
+      .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
+      .map(r => `
+        <tr>
+          <td>${formatDate(r.date)}</td>
+          <td>${formatHours(r.hours)}</td>
+          <td>${r.routeTitle || (r.id ? r.id.replace('routes/', '') : 'Unknown')}</td>
+        </tr>
+      `).join('');
+
+    const htmlContent = `
       <html>
         <head>
           <title>Pay Statement - ${driver.displayName} - ${data.month}</title>
@@ -190,7 +215,7 @@ export default function AdminDashboard() {
             .summary { background-color: #f0f8ff; padding: 20px; margin: 20px 0; border-radius: 4px; border: 2px solid #007bff; }
             .summary h2 { margin-top: 0; color: #007bff; }
             .total-pay { font-size: 1.5rem; font-weight: bold; color: #007bff; margin-top: 15px; }
-            .adjustment { color: ${driver.adjustment > 0 ? '#28a745' : driver.adjustment < 0 ? '#dc3545' : '#666'}; }
+            .adjustment { color: ${adjustmentColor}; }
           </style>
         </head>
         <body>
@@ -221,26 +246,25 @@ export default function AdminDashboard() {
               </tr>
             </thead>
             <tbody>
-              ${driver.routes
-                .sort((a, b) => new Date(b.date) - new Date(a.date))
-                .map(r => `
-                  <tr>
-                    <td>${formatDate(r.date)}</td>
-                    <td>${r.hours.toFixed(2)}</td>
-                    <td>${r.routeTitle || r.id.replace('routes/', '')}</td>
-                  </tr>
-                `).join('')}
+              ${routeRows}
             </tbody>
           </table>
         </body>
       </html>
-    `);
+    `;
+
+    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    if (!printWindow) {
+      alert('Please allow pop-ups to download PDF');
+      return;
+    }
+    printWindow.document.write(htmlContent);
     printWindow.document.close();
     printWindow.focus();
     setTimeout(() => {
       printWindow.print();
       printWindow.close();
-    }, 250);
+    }, 500);
   }
 
   if (!username) {
