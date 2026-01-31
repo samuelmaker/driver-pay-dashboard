@@ -16,6 +16,22 @@ export default async function handler(req, res) {
 
   // issue JWT (short TTL)
   const token = sign({ username }, process.env.JWT_SECRET || 'dev-secret', { expiresIn: '8h' });
-  res.setHeader('Set-Cookie', `soda_session=${token}; HttpOnly; Path=/; Max-Age=${8*3600}`);
+
+  // Build secure cookie string
+  const isProduction = process.env.NODE_ENV === 'production';
+  const cookieParts = [
+    `soda_session=${token}`,
+    'HttpOnly',
+    'Path=/',
+    `Max-Age=${8 * 3600}`,
+    'SameSite=Strict'
+  ];
+
+  // Add Secure flag in production (HTTPS only)
+  if (isProduction) {
+    cookieParts.push('Secure');
+  }
+
+  res.setHeader('Set-Cookie', cookieParts.join('; '));
   return res.json({ ok: true });
 }

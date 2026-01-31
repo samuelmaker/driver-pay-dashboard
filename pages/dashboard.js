@@ -1,22 +1,53 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 
+function getSpokeUrl(routeId, planId) {
+  if (!routeId || !planId) return null;
+  const planIdPart = planId.replace('plans/', '');
+  const routeIdPart = routeId.replace('routes/', '');
+  return `https://dispatch.spoke.com/plans/${planIdPart}/route/${routeIdPart}`;
+}
+
+function formatDate(dateString) {
+  if (!dateString) return '-';
+  return new Date(dateString).toLocaleDateString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short'
+  });
+}
+
+function getMonthOptions() {
+  const options = [];
+  const now = new Date();
+  // Show current month and 11 previous months
+  for (let i = 0; i < 12; i++) {
+    const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    const label = date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+    options.push({ value, label });
+  }
+  return options;
+}
+
 export default function Dashboard() {
   const router = useRouter();
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   const [loading, setLoading] = useState(false);
   const [username, setUsername] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState('');
 
   useEffect(() => {
-    // Check authentication and load driver data
     const checkAuthAndLoad = async () => {
       const res = await fetch('/api/auth/check');
       if (res.ok) {
         const authData = await res.json();
         setUsername(authData.username);
-        // Auto-load driver data
-        loadDriverData();
+        // Set default month to current month
+        const now = new Date();
+        const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        setSelectedMonth(currentMonth);
       } else {
         router.push('/login');
       }
@@ -24,10 +55,16 @@ export default function Dashboard() {
     checkAuthAndLoad();
   }, [router]);
 
-  async function loadDriverData() {
+  useEffect(() => {
+    if (selectedMonth && username) {
+      loadDriverData(selectedMonth);
+    }
+  }, [selectedMonth, username]);
+
+  async function loadDriverData(month) {
     setErr(null);
     setLoading(true);
-    const res = await fetch('/api/driver');
+    const res = await fetch(`/api/driver?month=${month}`);
     const j = await res.json();
     setLoading(false);
     if (res.ok) setData(j); else setErr(j.error || 'error');
@@ -42,11 +79,11 @@ export default function Dashboard() {
     if (!data) return;
 
     const rows = [
-      ['Date', 'Hours', 'Route ID'],
+      ['Date', 'Hours', 'Route'],
       ...data.details.map(d => [
-        d.date,
+        formatDate(d.date),
         d.hours,
-        d.id
+        d.routeTitle || d.id.replace('routes/', '')
       ]),
       ['', '', ''],
       ['Total Hours', data.hours, ''],
@@ -101,15 +138,15 @@ export default function Dashboard() {
               <tr>
                 <th>Date</th>
                 <th>Hours</th>
-                <th>Route ID</th>
+                <th>Route</th>
               </tr>
             </thead>
             <tbody>
               ${data.details.map(d => `
                 <tr>
-                  <td>${d.date}</td>
+                  <td>${new Date(d.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}</td>
                   <td>${d.hours}</td>
-                  <td>${d.id}</td>
+                  <td>${d.routeTitle || d.id.replace('routes/', '')}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -129,6 +166,8 @@ export default function Dashboard() {
     return <div style={{ textAlign: 'center', padding: '2rem' }}>Loading...</div>;
   }
 
+  const monthOptions = getMonthOptions();
+
   return (
     <div style={{
       maxWidth: 900,
@@ -140,29 +179,49 @@ export default function Dashboard() {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: '2rem'
+        marginBottom: '2rem',
+        flexWrap: 'wrap',
+        gap: '1rem'
       }}>
         <div>
           <h1 style={{ margin: 0, color: '#333' }}>Driver Dashboard</h1>
           <p style={{ margin: '0.5rem 0 0 0', color: '#666' }}>Welcome, {username}</p>
         </div>
-        <button
-          onClick={logout}
-          style={{
-            padding: '0.5rem 1.5rem',
-            fontSize: '0.9rem',
-            color: '#666',
-            backgroundColor: '#fff',
-            border: '1px solid #ddd',
-            borderRadius: '4px',
-            cursor: 'pointer'
-          }}
-        >
-          Logout
-        </button>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <select
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            style={{
+              padding: '0.5rem 1rem',
+              fontSize: '1rem',
+              border: '1px solid #ddd',
+              borderRadius: '4px',
+              backgroundColor: '#fff',
+              cursor: 'pointer'
+            }}
+          >
+            {monthOptions.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+          <button
+            onClick={logout}
+            style={{
+              padding: '0.5rem 1.5rem',
+              fontSize: '0.9rem',
+              color: '#666',
+              backgroundColor: '#fff',
+              border: '1px solid #ddd',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+          >
+            Logout
+          </button>
+        </div>
       </div>
 
-      {loading && !data && (
+      {loading && (
         <div style={{
           backgroundColor: '#f0f8ff',
           padding: '2rem',
@@ -174,7 +233,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {err && (
+      {err && !loading && (
         <div style={{
           padding: '1rem',
           backgroundColor: '#fee',
@@ -186,7 +245,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {data && (
+      {data && !loading && (
         <div>
           <div style={{
             backgroundColor: '#f0f8ff',
@@ -297,30 +356,65 @@ export default function Dashboard() {
                     padding: '0.75rem',
                     textAlign: 'left',
                     borderBottom: '2px solid #ddd'
-                  }}>Route ID</th>
+                  }}>Route</th>
                 </tr>
               </thead>
               <tbody>
-                {data.details.map((d, idx) => (
-                  <tr key={d.id} style={{
-                    backgroundColor: idx % 2 === 0 ? '#fff' : '#f9f9f9'
-                  }}>
-                    <td style={{
-                      padding: '0.75rem',
-                      borderBottom: '1px solid #eee'
-                    }}>{new Date(d.date).toLocaleDateString()}</td>
-                    <td style={{
-                      padding: '0.75rem',
-                      borderBottom: '1px solid #eee'
-                    }}>{d.hours}</td>
-                    <td style={{
-                      padding: '0.75rem',
-                      borderBottom: '1px solid #eee',
-                      fontFamily: 'monospace',
-                      fontSize: '0.9rem'
-                    }}>{d.id}</td>
-                  </tr>
-                ))}
+                {data.details.map((d, idx) => {
+                  const spokeUrl = getSpokeUrl(d.id, d.planId);
+                  return (
+                    <tr key={d.id} style={{
+                      backgroundColor: idx % 2 === 0 ? '#fff' : '#f9f9f9'
+                    }}>
+                      <td style={{
+                        padding: '0.75rem',
+                        borderBottom: '1px solid #eee'
+                      }}>{formatDate(d.date)}</td>
+                      <td style={{
+                        padding: '0.75rem',
+                        borderBottom: '1px solid #eee'
+                      }}>
+                        {d.status === 'in_progress' ? (
+                          <span style={{ color: '#f0ad4e', fontWeight: '500' }}>In Progress</span>
+                        ) : d.status === 'not_started' ? (
+                          <span style={{ color: '#999' }}>Not Started</span>
+                        ) : (
+                          d.hours !== null ? d.hours : '-'
+                        )}
+                      </td>
+                      <td style={{
+                        padding: '0.75rem',
+                        borderBottom: '1px solid #eee'
+                      }}>
+                        {spokeUrl ? (
+                          <a
+                            href={spokeUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              color: '#007bff',
+                              textDecoration: 'none',
+                              fontFamily: 'monospace',
+                              fontSize: '0.9rem'
+                            }}
+                            onMouseOver={(e) => e.target.style.textDecoration = 'underline'}
+                            onMouseOut={(e) => e.target.style.textDecoration = 'none'}
+                          >
+                            {d.routeTitle || d.id.replace('routes/', '')} ↗
+                          </a>
+                        ) : (
+                          <span style={{
+                            fontFamily: 'monospace',
+                            fontSize: '0.9rem',
+                            color: '#666'
+                          }}>
+                            {d.routeTitle || d.id}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

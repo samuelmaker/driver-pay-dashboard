@@ -53,7 +53,8 @@ export default async function handler(req, res) {
         adjustmentReason: adjusted.reason,
         rate: payRate,
         pay,
-        routeCount: driverData.details.length
+        routeCount: driverData.details.length,
+        routes: driverData.details
       };
     });
 
