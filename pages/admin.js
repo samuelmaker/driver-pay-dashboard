@@ -1,45 +1,80 @@
-import { useEffect, useState, Fragment } from 'react';
-import { useRouter } from 'next/router';
+import { useEffect, useState, Fragment } from "react";
+import { useRouter } from "next/router";
 
 function getSpokeUrl(routeId, planId) {
   if (!routeId || !planId) return null;
-  const planIdPart = planId.replace('plans/', '');
-  const routeIdPart = routeId.replace('routes/', '');
+  const planIdPart = planId.replace("plans/", "");
+  const routeIdPart = routeId.replace("routes/", "");
   return `https://dispatch.spoke.com/plans/${planIdPart}/route/${routeIdPart}`;
 }
 
 function formatDate(dateString) {
-  if (!dateString) return '-';
-  return new Date(dateString).toLocaleDateString('en-GB', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short'
+  if (!dateString) return "-";
+  return new Date(dateString).toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
   });
 }
 
 function formatTime(timestampSeconds) {
-  if (!timestampSeconds) return '-';
-  return new Date(timestampSeconds * 1000).toLocaleTimeString('en-GB', {
-    hour: '2-digit',
-    minute: '2-digit'
+  if (!timestampSeconds) return "-";
+  return new Date(timestampSeconds * 1000).toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
   });
 }
 
 function formatDayKeyLikeRouteDate(dayKey) {
-  if (!dayKey || typeof dayKey !== 'string') return '-';
+  if (!dayKey || typeof dayKey !== "string") return "-";
   try {
     // Use midday UTC to avoid edge cases around DST shifting the local date.
     const d = new Date(`${dayKey}T12:00:00.000Z`);
-    if (Number.isNaN(d.getTime())) return '-';
-    return d.toLocaleDateString('en-GB', {
-      timeZone: 'Europe/London',
-      weekday: 'short',
-      day: 'numeric',
-      month: 'short'
+    if (Number.isNaN(d.getTime())) return "-";
+    return d.toLocaleDateString("en-GB", {
+      timeZone: "Europe/London",
+      weekday: "short",
+      day: "numeric",
+      month: "short",
     });
   } catch (e) {
-    return '-';
+    return "-";
   }
+}
+
+function getPayPeriodLabel(year, month) {
+  // Pay period: 28th of previous month to 27th of current month
+  let startYear = year;
+  let startMonth = month - 1;
+  if (startMonth < 1) {
+    startMonth = 12;
+    startYear = year - 1;
+  }
+
+  const startDate = new Date(startYear, startMonth - 1, 28);
+  const endDate = new Date(year, month - 1, 27);
+
+  const startStr = startDate.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+  });
+  const endStr = endDate.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+  });
+
+  return `${startStr} - ${endStr}`;
+}
+
+function formatPayPeriodFromMonth(monthStr) {
+  // Convert YYYY-MM to a display string with pay period dates
+  const [year, month] = monthStr.split("-").map(Number);
+  const monthName = new Date(year, month - 1, 1).toLocaleDateString("en-GB", {
+    month: "long",
+    year: "numeric",
+  });
+  const periodRange = getPayPeriodLabel(year, month);
+  return `${monthName} (${periodRange})`;
 }
 
 function getMonthOptions() {
@@ -48,8 +83,15 @@ function getMonthOptions() {
   // Show current month and 11 previous months
   for (let i = 0; i < 12; i++) {
     const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    const label = date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+    const value = `${year}-${String(month).padStart(2, "0")}`;
+    const monthName = date.toLocaleDateString("en-GB", {
+      month: "long",
+      year: "numeric",
+    });
+    const periodRange = getPayPeriodLabel(year, month);
+    const label = `${monthName} Pay (${periodRange})`;
     options.push({ value, label });
   }
   return options;
@@ -60,42 +102,44 @@ export default function AdminDashboard() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState("");
   const [selectedDriver, setSelectedDriver] = useState(null);
   const [expandedDriver, setExpandedDriver] = useState(null);
-  const [adjustmentHours, setAdjustmentHours] = useState('');
-  const [adjustmentReason, setAdjustmentReason] = useState('');
-  const [selectedDayKey, setSelectedDayKey] = useState('');
-  const [selectedMonth, setSelectedMonth] = useState('');
+  const [adjustmentHours, setAdjustmentHours] = useState("");
+  const [adjustmentReason, setAdjustmentReason] = useState("");
+  const [selectedDayKey, setSelectedDayKey] = useState("");
+  const [selectedMonth, setSelectedMonth] = useState("");
 
   function getDayKeyFromDateString(dateString) {
-    if (!dateString) return '';
+    if (!dateString) return "";
     try {
       const d = new Date(dateString);
-      if (Number.isNaN(d.getTime())) return '';
-      return new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'Europe/London',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit'
+      if (Number.isNaN(d.getTime())) return "";
+      return new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Europe/London",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
       }).format(d);
     } catch (e) {
-      return '';
+      return "";
     }
   }
 
   useEffect(() => {
     const checkAuthAndLoad = async () => {
-      const res = await fetch('/api/auth/check');
+      const res = await fetch("/api/auth/check");
       if (res.ok) {
         const authData = await res.json();
         setUsername(authData.username);
         // Set default month to current month
         const now = new Date();
-        const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const currentMonth = `${now.getFullYear()}-${String(
+          now.getMonth() + 1
+        ).padStart(2, "0")}`;
         setSelectedMonth(currentMonth);
       } else {
-        router.push('/login');
+        router.push("/login");
       }
     };
     checkAuthAndLoad();
@@ -113,37 +157,38 @@ export default function AdminDashboard() {
     const res = await fetch(`/api/admin/all-drivers?month=${month}`);
     const j = await res.json();
     setLoading(false);
-    if (res.ok) setData(j); else setErr(j.error || 'error');
+    if (res.ok) setData(j);
+    else setErr(j.error || "error");
   }
 
   async function logout() {
-    await fetch('/api/auth/logout', { method: 'POST' });
-    router.push('/login');
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
   }
 
   async function submitAdjustment() {
-    if (!selectedDriver || !selectedDayKey || adjustmentHours === '') return;
+    if (!selectedDriver || !selectedDayKey || adjustmentHours === "") return;
 
-    const res = await fetch('/api/admin/adjust-hours', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    const res = await fetch("/api/admin/adjust-hours", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         username: selectedDriver.username,
         dayKey: selectedDayKey,
         adjustment: parseFloat(adjustmentHours),
-        reason: adjustmentReason
-      })
+        reason: adjustmentReason,
+      }),
     });
 
     if (res.ok) {
       setSelectedDriver(null);
-      setSelectedDayKey('');
-      setAdjustmentHours('');
-      setAdjustmentReason('');
+      setSelectedDayKey("");
+      setAdjustmentHours("");
+      setAdjustmentReason("");
       loadAllDrivers(selectedMonth);
     } else {
       const error = await res.json();
-      alert('Error: ' + error.error);
+      alert("Error: " + error.error);
     }
   }
 
@@ -155,26 +200,48 @@ export default function AdminDashboard() {
     if (!data) return;
 
     const rows = [
-      ['Driver', 'Username', 'Calculated Hours', 'Adjustment', 'Adjustment Reason', 'Total Hours', 'Rate (£/hr)', 'Total Pay (£)', 'Routes'],
-      ...data.drivers.map(d => [
-        d.displayName || '',
-        d.username || '',
+      [
+        "Driver",
+        "Username",
+        "Calculated Hours",
+        "Adjustment",
+        "Adjustment Reason",
+        "Total Hours",
+        "Rate (£/hr)",
+        "Total Pay (£)",
+        "Routes",
+      ],
+      ...data.drivers.map((d) => [
+        d.displayName || "",
+        d.username || "",
         (d.calculatedHours || 0).toFixed(2),
-        d.adjustment !== 0 ? d.adjustment.toFixed(2) : '0',
-        d.adjustmentReason || '',
+        d.adjustment !== 0 ? d.adjustment.toFixed(2) : "0",
+        d.adjustmentReason || "",
         (d.hours || 0).toFixed(2),
         d.rate || 0,
         (d.pay || 0).toFixed(2),
-        d.routeCount || 0
+        d.routeCount || 0,
       ]),
-      ['', '', '', '', '', '', '', '', ''],
-      ['TOTALS', '', '', '', '', (data.totalHours || 0).toFixed(2), '', (data.totalPay || 0).toFixed(2), '']
+      ["", "", "", "", "", "", "", "", ""],
+      [
+        "TOTALS",
+        "",
+        "",
+        "",
+        "",
+        (data.totalHours || 0).toFixed(2),
+        "",
+        (data.totalPay || 0).toFixed(2),
+        "",
+      ],
     ];
 
-    const csvContent = rows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const csvContent = rows
+      .map((row) => row.map((cell) => `"${cell}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
     a.download = `all-drivers-pay-${data.month}.csv`;
     document.body.appendChild(a);
@@ -187,25 +254,26 @@ export default function AdminDashboard() {
     if (!driver || !driver.routes) return;
 
     const csvCell = (value) => {
-      const s = value === null || value === undefined ? '' : String(value);
+      const s = value === null || value === undefined ? "" : String(value);
       return `"${s.replace(/"/g, '""')}"`;
     };
 
     const formatMoney = (amount) => {
       const n = Number(amount || 0);
-      const sign = n < 0 ? '-' : '';
+      const sign = n < 0 ? "-" : "";
       return `${sign}£${Math.abs(n).toFixed(2)}`;
     };
 
     const formatHoursForExport = (hours, status) => {
-      if (status === 'not_started') return 'Not Started';
-      if (status === 'in_progress') return 'In Progress';
-      if (hours === null || hours === undefined || Number.isNaN(Number(hours))) return 'In Progress';
+      if (status === "not_started") return "Not Started";
+      if (status === "in_progress") return "In Progress";
+      if (hours === null || hours === undefined || Number.isNaN(Number(hours)))
+        return "In Progress";
       return Number(hours).toFixed(2);
     };
 
     const routeAmount = (hours, status, rate) => {
-      if (status !== 'completed') return 0;
+      if (status !== "completed") return 0;
       const h = Number(hours);
       if (!Number.isFinite(h)) return 0;
       return h * Number(rate || 0);
@@ -213,41 +281,49 @@ export default function AdminDashboard() {
 
     const rows = [
       [`Pay Statement for ${driver.displayName} - ${data.month}`],
-      [''],
-      ['Summary'],
-      ['Calculated Hours', driver.calculatedHours.toFixed(2)],
-      ['Adjustment Hours', driver.adjustment !== 0 ? driver.adjustment.toFixed(2) : '0.00'],
-      ['Adjustment Amount', driver.adjustment !== 0 ? formatMoney(driver.adjustment * Number(driver.rate || 0)) : formatMoney(0)],
-      ['Adjustment Reason', driver.adjustmentReason || ''],
-      ['Total Hours', driver.hours.toFixed(2)],
-      ['Hourly Rate', `£${driver.rate}`],
-      ['Total Pay', `£${driver.pay.toFixed(2)}`],
-      [''],
-      ['Route Breakdown'],
-      ['Date', 'Hours', 'Amount (£)', 'Route'],
+      [""],
+      ["Summary"],
+      ["Calculated Hours", driver.calculatedHours.toFixed(2)],
+      [
+        "Adjustment Hours",
+        driver.adjustment !== 0 ? driver.adjustment.toFixed(2) : "0.00",
+      ],
+      [
+        "Adjustment Amount",
+        driver.adjustment !== 0
+          ? formatMoney(driver.adjustment * Number(driver.rate || 0))
+          : formatMoney(0),
+      ],
+      ["Adjustment Reason", driver.adjustmentReason || ""],
+      ["Total Hours", driver.hours.toFixed(2)],
+      ["Hourly Rate", `£${driver.rate}`],
+      ["Total Pay", `£${driver.pay.toFixed(2)}`],
+      [""],
+      ["Route Breakdown"],
+      ["Date", "Hours", "Amount (£)", "Route"],
       ...driver.routes
         .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
-        .map(r => ([
+        .map((r) => [
           formatDate(r.date),
           formatHoursForExport(r.hours, r.status),
           formatMoney(routeAmount(r.hours, r.status, driver.rate)),
-          r.routeTitle || (r.id ? r.id.replace('routes/', '') : 'Unknown')
-        ])),
+          r.routeTitle || (r.id ? r.id.replace("routes/", "") : "Unknown"),
+        ]),
     ];
 
     if (Number(driver.adjustment || 0) !== 0) {
       rows.push([
-        'Adjustment',
+        "Adjustment",
         Number(driver.adjustment || 0).toFixed(2),
         formatMoney(Number(driver.adjustment || 0) * Number(driver.rate || 0)),
-        driver.adjustmentReason || ''
+        driver.adjustmentReason || "",
       ]);
     }
 
-    const csvContent = rows.map(row => row.map(csvCell).join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const csvContent = rows.map((row) => row.map(csvCell).join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
     a.download = `${driver.username}-pay-${data.month}.csv`;
     document.body.appendChild(a);
@@ -261,59 +337,74 @@ export default function AdminDashboard() {
 
     const formatMoney = (amount) => {
       const n = Number(amount || 0);
-      const sign = n < 0 ? '-' : '';
+      const sign = n < 0 ? "-" : "";
       return `${sign}£${Math.abs(n).toFixed(2)}`;
     };
 
     const formatHoursForExport = (hours, status) => {
-      if (status === 'not_started') return 'Not Started';
-      if (status === 'in_progress') return 'In Progress';
-      if (hours === null || hours === undefined || Number.isNaN(Number(hours))) return 'In Progress';
+      if (status === "not_started") return "Not Started";
+      if (status === "in_progress") return "In Progress";
+      if (hours === null || hours === undefined || Number.isNaN(Number(hours)))
+        return "In Progress";
       return Number(hours).toFixed(2);
     };
 
     const routeAmount = (hours, status, rate) => {
-      if (status !== 'completed') return 0;
+      if (status !== "completed") return 0;
       const h = Number(hours);
       if (!Number.isFinite(h)) return 0;
       return h * Number(rate || 0);
     };
 
-    const adjustmentColor = driver.adjustment > 0 ? '#28a745' : driver.adjustment < 0 ? '#dc3545' : '#666';
+    const adjustmentColor =
+      driver.adjustment > 0
+        ? "#28a745"
+        : driver.adjustment < 0
+        ? "#dc3545"
+        : "#666";
 
     const routeRows = driver.routes
       .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
-      .map(r => `
+      .map(
+        (r) => `
         <tr>
           <td>${formatDate(r.date)}</td>
           <td>${formatHoursForExport(r.hours, r.status)}</td>
           <td>${formatMoney(routeAmount(r.hours, r.status, driver.rate))}</td>
-          <td>${r.routeTitle || (r.id ? r.id.replace('routes/', '') : 'Unknown')}</td>
+          <td>${
+            r.routeTitle || (r.id ? r.id.replace("routes/", "") : "Unknown")
+          }</td>
         </tr>
-      `).join('');
+      `
+      )
+      .join("");
 
     const adjustmentRows = Object.entries(driver.adjustmentsByDay || {})
       .sort(([a], [b]) => b.localeCompare(a))
       .map(([dayKey, adj]) => {
         const hours = Number(adj?.hours || 0);
-        if (!Number.isFinite(hours) || hours === 0) return '';
+        if (!Number.isFinite(hours) || hours === 0) return "";
         const prettyDate = formatDayKeyLikeRouteDate(dayKey);
         return `
           <tr>
             <td>${prettyDate}</td>
             <td>${hours.toFixed(2)}</td>
             <td>${formatMoney(hours * Number(driver.rate || 0))}</td>
-            <td>Adjustment (${prettyDate})${adj?.reason ? ` - ${adj.reason}` : ''}</td>
+            <td>Adjustment (${prettyDate})${
+          adj?.reason ? ` - ${adj.reason}` : ""
+        }</td>
           </tr>
         `;
       })
       .filter(Boolean)
-      .join('');
+      .join("");
 
     const htmlContent = `
       <html>
         <head>
-          <title>Pay Statement - ${driver.displayName} - ${data.month}</title>
+          <title>Pay Statement - ${
+            driver.displayName
+          } - ${formatPayPeriodFromMonth(data.month)}</title>
           <style>
             body { font-family: Arial, sans-serif; padding: 40px; }
             h1 { color: #333; margin-bottom: 5px; }
@@ -330,16 +421,30 @@ export default function AdminDashboard() {
         <body>
           <h1>Driver Pay Statement</h1>
           <p class="subtitle">${driver.displayName} (@${driver.username})</p>
-          <p><strong>Period:</strong> ${data.month}</p>
-          <p><strong>Generated:</strong> ${new Date().toLocaleDateString('en-GB')}</p>
+          <p><strong>Period:</strong> ${formatPayPeriodFromMonth(
+            data.month
+          )}</p>
+          <p><strong>Generated:</strong> ${new Date().toLocaleDateString(
+            "en-GB"
+          )}</p>
 
           <div class="summary">
             <h2>Summary</h2>
-            <p><strong>Calculated Hours:</strong> ${driver.calculatedHours.toFixed(2)}</p>
-            ${driver.adjustment !== 0 ? `
-              <p class="adjustment"><strong>Adjustment:</strong> ${driver.adjustment > 0 ? '+' : ''}${driver.adjustment.toFixed(2)} hours
-              ${driver.adjustmentReason ? ` (${driver.adjustmentReason})` : ''}</p>
-            ` : ''}
+            <p><strong>Calculated Hours:</strong> ${driver.calculatedHours.toFixed(
+              2
+            )}</p>
+            ${
+              driver.adjustment !== 0
+                ? `
+              <p class="adjustment"><strong>Adjustment:</strong> ${
+                driver.adjustment > 0 ? "+" : ""
+              }${driver.adjustment.toFixed(2)} hours
+              ${
+                driver.adjustmentReason ? ` (${driver.adjustmentReason})` : ""
+              }</p>
+            `
+                : ""
+            }
             <p><strong>Total Hours:</strong> ${driver.hours.toFixed(2)}</p>
             <p><strong>Hourly Rate:</strong> £${driver.rate}/hour</p>
             <p class="total-pay">Total Pay: £${driver.pay.toFixed(2)}</p>
@@ -364,9 +469,9 @@ export default function AdminDashboard() {
       </html>
     `;
 
-    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    const printWindow = window.open("", "_blank", "width=800,height=600");
     if (!printWindow) {
-      alert('Please allow pop-ups to download PDF');
+      alert("Please allow pop-ups to download PDF");
       return;
     }
     printWindow.document.write(htmlContent);
@@ -379,57 +484,67 @@ export default function AdminDashboard() {
   }
 
   if (!username) {
-    return <div style={{ textAlign: 'center', padding: '2rem' }}>Loading...</div>;
+    return (
+      <div style={{ textAlign: "center", padding: "2rem" }}>Loading...</div>
+    );
   }
 
   const monthOptions = getMonthOptions();
 
   return (
-    <div style={{
-      maxWidth: 1200,
-      margin: '2rem auto',
-      padding: '2rem',
-      fontFamily: 'system-ui, -apple-system, sans-serif'
-    }}>
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '2rem',
-        flexWrap: 'wrap',
-        gap: '1rem'
-      }}>
+    <div
+      style={{
+        maxWidth: 1200,
+        margin: "2rem auto",
+        padding: "2rem",
+        fontFamily: "system-ui, -apple-system, sans-serif",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: "2rem",
+          flexWrap: "wrap",
+          gap: "1rem",
+        }}
+      >
         <div>
-          <h1 style={{ margin: 0, color: '#333' }}>Admin Dashboard</h1>
-          <p style={{ margin: '0.5rem 0 0 0', color: '#666' }}>Welcome, {username}</p>
+          <h1 style={{ margin: 0, color: "#333" }}>Admin Dashboard</h1>
+          <p style={{ margin: "0.5rem 0 0 0", color: "#666" }}>
+            Welcome, {username}
+          </p>
         </div>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+        <div style={{ display: "flex", gap: "1rem", alignItems: "center" }}>
           <select
             value={selectedMonth}
             onChange={(e) => setSelectedMonth(e.target.value)}
             style={{
-              padding: '0.5rem 1rem',
-              fontSize: '1rem',
-              border: '1px solid #ddd',
-              borderRadius: '4px',
-              backgroundColor: '#fff',
-              cursor: 'pointer'
+              padding: "0.5rem 1rem",
+              fontSize: "1rem",
+              border: "1px solid #ddd",
+              borderRadius: "4px",
+              backgroundColor: "#fff",
+              cursor: "pointer",
             }}
           >
-            {monthOptions.map(opt => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            {monthOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
             ))}
           </select>
           <button
             onClick={logout}
             style={{
-              padding: '0.5rem 1.5rem',
-              fontSize: '0.9rem',
-              color: '#666',
-              backgroundColor: '#fff',
-              border: '1px solid #ddd',
-              borderRadius: '4px',
-              cursor: 'pointer'
+              padding: "0.5rem 1.5rem",
+              fontSize: "0.9rem",
+              color: "#666",
+              backgroundColor: "#fff",
+              border: "1px solid #ddd",
+              borderRadius: "4px",
+              cursor: "pointer",
             }}
           >
             Logout
@@ -438,60 +553,89 @@ export default function AdminDashboard() {
       </div>
 
       {loading && (
-        <div style={{
-          backgroundColor: '#f0f8ff',
-          padding: '2rem',
-          borderRadius: '8px',
-          textAlign: 'center',
-          marginBottom: '2rem'
-        }}>
-          <p style={{ fontSize: '1.2rem', color: '#007bff', margin: 0 }}>Loading driver data...</p>
+        <div
+          style={{
+            backgroundColor: "#f0f8ff",
+            padding: "2rem",
+            borderRadius: "8px",
+            textAlign: "center",
+            marginBottom: "2rem",
+          }}
+        >
+          <p style={{ fontSize: "1.2rem", color: "#007bff", margin: 0 }}>
+            Loading driver data...
+          </p>
         </div>
       )}
 
       {err && (
-        <div style={{
-          padding: '1rem',
-          backgroundColor: '#fee',
-          color: '#c33',
-          borderRadius: '4px',
-          marginBottom: '2rem'
-        }}>
+        <div
+          style={{
+            padding: "1rem",
+            backgroundColor: "#fee",
+            color: "#c33",
+            borderRadius: "4px",
+            marginBottom: "2rem",
+          }}
+        >
           {err}
         </div>
       )}
 
       {data && !loading && (
         <div>
-          <div style={{
-            backgroundColor: '#f0f8ff',
-            padding: '1.5rem',
-            borderRadius: '8px',
-            marginBottom: '2rem',
-            border: '2px solid #007bff'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
+          <div
+            style={{
+              backgroundColor: "#f0f8ff",
+              padding: "1.5rem",
+              borderRadius: "8px",
+              marginBottom: "2rem",
+              border: "2px solid #007bff",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                flexWrap: "wrap",
+                gap: "1rem",
+              }}
+            >
               <div>
-                <h2 style={{ margin: '0 0 1rem 0', color: '#007bff' }}>
-                  Summary - {new Date(data.month + '-01').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}
+                <h2 style={{ margin: "0 0 1rem 0", color: "#007bff" }}>
+                  Summary - {formatPayPeriodFromMonth(data.month)}
                 </h2>
-                <div style={{ display: 'flex', gap: '2rem', fontSize: '1.1rem', flexWrap: 'wrap' }}>
-                  <div><strong>Total Drivers:</strong> {data.totalDrivers}</div>
-                  <div><strong>Total Hours:</strong> {data.totalHours.toFixed(2)}</div>
-                  <div><strong>Total Pay:</strong> £{data.totalPay.toFixed(2)}</div>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "2rem",
+                    fontSize: "1.1rem",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div>
+                    <strong>Total Drivers:</strong> {data.totalDrivers}
+                  </div>
+                  <div>
+                    <strong>Total Hours:</strong> {data.totalHours.toFixed(2)}
+                  </div>
+                  <div>
+                    <strong>Total Pay:</strong> £{data.totalPay.toFixed(2)}
+                  </div>
                 </div>
               </div>
               <button
                 onClick={downloadAllDriversCSV}
                 style={{
-                  padding: '0.5rem 1rem',
-                  fontSize: '0.9rem',
-                  fontWeight: '600',
-                  color: '#fff',
-                  backgroundColor: '#28a745',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer'
+                  padding: "0.5rem 1rem",
+                  fontSize: "0.9rem",
+                  fontWeight: "600",
+                  color: "#fff",
+                  backgroundColor: "#28a745",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: "pointer",
                 }}
               >
                 Download All (CSV)
@@ -499,31 +643,98 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          <div style={{
-            backgroundColor: '#fff',
-            padding: '2rem',
-            borderRadius: '8px',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-          }}>
+          <div
+            style={{
+              backgroundColor: "#fff",
+              padding: "2rem",
+              borderRadius: "8px",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+            }}
+          >
             <h3 style={{ marginTop: 0 }}>All Drivers</h3>
-            <p style={{ color: '#666', fontSize: '0.9rem', marginBottom: '1rem' }}>
-              Click on a driver row to view their routes. Use the download buttons to get individual statements.
+            <p
+              style={{
+                color: "#666",
+                fontSize: "0.9rem",
+                marginBottom: "1rem",
+              }}
+            >
+              Click on a driver row to view their routes. Use the download
+              buttons to get individual statements.
             </p>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{
-                width: '100%',
-                borderCollapse: 'collapse',
-                minWidth: '800px'
-              }}>
+            <div style={{ overflowX: "auto" }}>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  minWidth: "800px",
+                }}
+              >
                 <thead>
-                  <tr style={{ backgroundColor: '#f5f5f5' }}>
-                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>Driver</th>
-                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>Hours</th>
-                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>Adjustment</th>
-                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>Rate</th>
-                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>Pay</th>
-                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>Routes</th>
-                    <th style={{ padding: '0.75rem', textAlign: 'left', borderBottom: '2px solid #ddd' }}>Actions</th>
+                  <tr style={{ backgroundColor: "#f5f5f5" }}>
+                    <th
+                      style={{
+                        padding: "0.75rem",
+                        textAlign: "left",
+                        borderBottom: "2px solid #ddd",
+                      }}
+                    >
+                      Driver
+                    </th>
+                    <th
+                      style={{
+                        padding: "0.75rem",
+                        textAlign: "left",
+                        borderBottom: "2px solid #ddd",
+                      }}
+                    >
+                      Hours
+                    </th>
+                    <th
+                      style={{
+                        padding: "0.75rem",
+                        textAlign: "left",
+                        borderBottom: "2px solid #ddd",
+                      }}
+                    >
+                      Adjustment
+                    </th>
+                    <th
+                      style={{
+                        padding: "0.75rem",
+                        textAlign: "left",
+                        borderBottom: "2px solid #ddd",
+                      }}
+                    >
+                      Rate
+                    </th>
+                    <th
+                      style={{
+                        padding: "0.75rem",
+                        textAlign: "left",
+                        borderBottom: "2px solid #ddd",
+                      }}
+                    >
+                      Pay
+                    </th>
+                    <th
+                      style={{
+                        padding: "0.75rem",
+                        textAlign: "left",
+                        borderBottom: "2px solid #ddd",
+                      }}
+                    >
+                      Routes
+                    </th>
+                    <th
+                      style={{
+                        padding: "0.75rem",
+                        textAlign: "left",
+                        borderBottom: "2px solid #ddd",
+                      }}
+                    >
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -532,65 +743,131 @@ export default function AdminDashboard() {
                       <tr
                         onClick={() => toggleDriverExpand(driver.username)}
                         style={{
-                          backgroundColor: expandedDriver === driver.username ? '#e8f4ff' : (idx % 2 === 0 ? '#fff' : '#f9f9f9'),
-                          cursor: 'pointer',
-                          transition: 'background-color 0.15s'
+                          backgroundColor:
+                            expandedDriver === driver.username
+                              ? "#e8f4ff"
+                              : idx % 2 === 0
+                              ? "#fff"
+                              : "#f9f9f9",
+                          cursor: "pointer",
+                          transition: "background-color 0.15s",
                         }}
                       >
-                        <td style={{ padding: '0.75rem', borderBottom: '1px solid #eee' }}>
+                        <td
+                          style={{
+                            padding: "0.75rem",
+                            borderBottom: "1px solid #eee",
+                          }}
+                        >
                           <strong>{driver.displayName}</strong>
                           <br />
-                          <small style={{ color: '#666' }}>@{driver.username}</small>
+                          <small style={{ color: "#666" }}>
+                            @{driver.username}
+                          </small>
                         </td>
-                        <td style={{ padding: '0.75rem', borderBottom: '1px solid #eee' }}>
+                        <td
+                          style={{
+                            padding: "0.75rem",
+                            borderBottom: "1px solid #eee",
+                          }}
+                        >
                           {driver.hours.toFixed(2)}
                           {driver.calculatedHours !== driver.hours && (
-                            <small style={{ display: 'block', color: '#666' }}>
+                            <small style={{ display: "block", color: "#666" }}>
                               (calc: {driver.calculatedHours.toFixed(2)})
                             </small>
                           )}
                         </td>
-                        <td style={{ padding: '0.75rem', borderBottom: '1px solid #eee' }}>
+                        <td
+                          style={{
+                            padding: "0.75rem",
+                            borderBottom: "1px solid #eee",
+                          }}
+                        >
                           {driver.adjustment !== 0 ? (
-                            <span style={{ color: driver.adjustment > 0 ? '#28a745' : '#dc3545' }}>
-                              {driver.adjustment > 0 ? '+' : ''}{driver.adjustment.toFixed(2)}
+                            <span
+                              style={{
+                                color:
+                                  driver.adjustment > 0 ? "#28a745" : "#dc3545",
+                              }}
+                            >
+                              {driver.adjustment > 0 ? "+" : ""}
+                              {driver.adjustment.toFixed(2)}
                               {driver.adjustmentReason && (
-                                <small style={{ display: 'block', color: '#666' }}>
+                                <small
+                                  style={{ display: "block", color: "#666" }}
+                                >
                                   {driver.adjustmentReason}
                                 </small>
                               )}
                             </span>
-                          ) : '-'}
+                          ) : (
+                            "-"
+                          )}
                         </td>
-                        <td style={{ padding: '0.75rem', borderBottom: '1px solid #eee' }}>
+                        <td
+                          style={{
+                            padding: "0.75rem",
+                            borderBottom: "1px solid #eee",
+                          }}
+                        >
                           £{driver.rate}/hr
                         </td>
-                        <td style={{ padding: '0.75rem', borderBottom: '1px solid #eee' }}>
+                        <td
+                          style={{
+                            padding: "0.75rem",
+                            borderBottom: "1px solid #eee",
+                          }}
+                        >
                           <strong>£{driver.pay.toFixed(2)}</strong>
                         </td>
-                        <td style={{ padding: '0.75rem', borderBottom: '1px solid #eee' }}>
-                          <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <td
+                          style={{
+                            padding: "0.75rem",
+                            borderBottom: "1px solid #eee",
+                          }}
+                        >
+                          <span
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "0.5rem",
+                            }}
+                          >
                             {driver.routeCount}
-                            <span style={{ color: '#007bff', fontSize: '0.8rem' }}>
-                              {expandedDriver === driver.username ? '▲' : '▼'}
+                            <span
+                              style={{ color: "#007bff", fontSize: "0.8rem" }}
+                            >
+                              {expandedDriver === driver.username ? "▲" : "▼"}
                             </span>
                           </span>
                         </td>
-                        <td style={{ padding: '0.75rem', borderBottom: '1px solid #eee' }}>
-                          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <td
+                          style={{
+                            padding: "0.75rem",
+                            borderBottom: "1px solid #eee",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "0.5rem",
+                              flexWrap: "wrap",
+                            }}
+                          >
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setSelectedDriver(driver);
                               }}
                               style={{
-                                padding: '0.25rem 0.5rem',
-                                fontSize: '0.8rem',
-                                color: '#fff',
-                                backgroundColor: '#007bff',
-                                border: 'none',
-                                borderRadius: '4px',
-                                cursor: 'pointer'
+                                padding: "0.25rem 0.5rem",
+                                fontSize: "0.8rem",
+                                color: "#fff",
+                                backgroundColor: "#007bff",
+                                border: "none",
+                                borderRadius: "4px",
+                                cursor: "pointer",
                               }}
                             >
                               Adjust
@@ -601,13 +878,13 @@ export default function AdminDashboard() {
                                 downloadDriverCSV(driver);
                               }}
                               style={{
-                                padding: '0.25rem 0.5rem',
-                                fontSize: '0.8rem',
-                                color: '#fff',
-                                backgroundColor: '#28a745',
-                                border: 'none',
-                                borderRadius: '4px',
-                                cursor: 'pointer'
+                                padding: "0.25rem 0.5rem",
+                                fontSize: "0.8rem",
+                                color: "#fff",
+                                backgroundColor: "#28a745",
+                                border: "none",
+                                borderRadius: "4px",
+                                cursor: "pointer",
                               }}
                             >
                               CSV
@@ -618,13 +895,13 @@ export default function AdminDashboard() {
                                 downloadDriverPDF(driver);
                               }}
                               style={{
-                                padding: '0.25rem 0.5rem',
-                                fontSize: '0.8rem',
-                                color: '#fff',
-                                backgroundColor: '#dc3545',
-                                border: 'none',
-                                borderRadius: '4px',
-                                cursor: 'pointer'
+                                padding: "0.25rem 0.5rem",
+                                fontSize: "0.8rem",
+                                color: "#fff",
+                                backgroundColor: "#dc3545",
+                                border: "none",
+                                borderRadius: "4px",
+                                cursor: "pointer",
                               }}
                             >
                               PDF
@@ -632,123 +909,312 @@ export default function AdminDashboard() {
                           </div>
                         </td>
                       </tr>
-                      {expandedDriver === driver.username && driver.routes && driver.routes.length > 0 && (
-                        <tr key={`${driver.username}-routes`}>
-                          <td colSpan="7" style={{ padding: 0, borderBottom: '1px solid #eee' }}>
-                            <div style={{
-                              backgroundColor: '#f8fafc',
-                              padding: '1rem 1.5rem',
-                              borderLeft: '4px solid #007bff'
-                            }}>
-                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-                                <thead>
-                                  <tr>
-                                    <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd', color: '#666' }}>Date</th>
-                                    <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd', color: '#666' }}>Start</th>
-                                    <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd', color: '#666' }}>End</th>
-                                    <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd', color: '#666' }}>Hours</th>
-                                    <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd', color: '#666' }}>Route</th>
-                                    <th style={{ padding: '0.5rem', textAlign: 'left', borderBottom: '1px solid #ddd', color: '#666' }}>Actions</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {driver.routes
-                                    .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
-                                    .map((route, rIdx) => {
-                                      const spokeUrl = getSpokeUrl(route.id, route.planId);
-                                      const dayKey = getDayKeyFromDateString(route.date);
-                                      const existingDayAdj = (dayKey && driver.adjustmentsByDay && driver.adjustmentsByDay[dayKey]) ? driver.adjustmentsByDay[dayKey] : null;
-                                      return (
-                                        <tr key={route.id || rIdx} style={{
-                                          backgroundColor: rIdx % 2 === 0 ? '#fff' : '#f8fafc'
-                                        }}>
-                                          <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
-                                            {formatDate(route.date)}
-                                          </td>
-                                          <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
-                                            {formatTime(route.startedAt)}
-                                          </td>
-                                          <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
-                                            {route.status === 'in_progress' ? (
-                                              <span style={{ color: '#f0ad4e' }}>-</span>
-                                            ) : (
-                                              formatTime(route.completedAt)
-                                            )}
-                                          </td>
-                                          <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
-                                            {route.status === 'in_progress' ? (
-                                              <span style={{ color: '#f0ad4e', fontWeight: '500' }}>In Progress</span>
-                                            ) : route.status === 'not_started' ? (
-                                              <span style={{ color: '#999' }}>Not Started</span>
-                                            ) : (
-                                              route.hours !== null ? route.hours.toFixed(2) : '-'
-                                            )}
-                                            {existingDayAdj && Number(existingDayAdj.hours || 0) !== 0 && (
-                                              <div style={{ fontSize: '0.8rem', color: existingDayAdj.hours > 0 ? '#28a745' : '#dc3545' }}>
-                                                Adj: {existingDayAdj.hours > 0 ? '+' : ''}{Number(existingDayAdj.hours).toFixed(2)}
-                                                {existingDayAdj.reason ? ` (${existingDayAdj.reason})` : ''}
-                                              </div>
-                                            )}
-                                          </td>
-                                          <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
-                                            {spokeUrl ? (
-                                              <a
-                                                href={spokeUrl}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                onClick={(e) => e.stopPropagation()}
-                                                style={{
-                                                  color: '#007bff',
-                                                  textDecoration: 'none',
-                                                  fontFamily: 'monospace',
-                                                  fontSize: '0.85rem'
-                                                }}
-                                                onMouseOver={(e) => e.target.style.textDecoration = 'underline'}
-                                                onMouseOut={(e) => e.target.style.textDecoration = 'none'}
-                                              >
-                                                {route.routeTitle || route.id.replace('routes/', '')} ↗
-                                              </a>
-                                            ) : (
-                                              <span style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: '#666' }}>
-                                                {route.id}
-                                              </span>
-                                            )}
-                                          </td>
-                                          <td style={{ padding: '0.5rem', borderBottom: '1px solid #eee' }}>
-                                            <button
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                if (!dayKey) {
-                                                  alert('Could not determine date for this route.');
-                                                  return;
-                                                }
-                                                setSelectedDriver(driver);
-                                                setSelectedDayKey(dayKey);
-                                                setAdjustmentHours(existingDayAdj ? String(existingDayAdj.hours) : '');
-                                                setAdjustmentReason(existingDayAdj ? (existingDayAdj.reason || '') : '');
-                                              }}
+                      {expandedDriver === driver.username &&
+                        driver.routes &&
+                        driver.routes.length > 0 && (
+                          <tr key={`${driver.username}-routes`}>
+                            <td
+                              colSpan="7"
+                              style={{
+                                padding: 0,
+                                borderBottom: "1px solid #eee",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  backgroundColor: "#f8fafc",
+                                  padding: "1rem 1.5rem",
+                                  borderLeft: "4px solid #007bff",
+                                }}
+                              >
+                                <table
+                                  style={{
+                                    width: "100%",
+                                    borderCollapse: "collapse",
+                                    fontSize: "0.9rem",
+                                  }}
+                                >
+                                  <thead>
+                                    <tr>
+                                      <th
+                                        style={{
+                                          padding: "0.5rem",
+                                          textAlign: "left",
+                                          borderBottom: "1px solid #ddd",
+                                          color: "#666",
+                                        }}
+                                      >
+                                        Date
+                                      </th>
+                                      <th
+                                        style={{
+                                          padding: "0.5rem",
+                                          textAlign: "left",
+                                          borderBottom: "1px solid #ddd",
+                                          color: "#666",
+                                        }}
+                                      >
+                                        Start
+                                      </th>
+                                      <th
+                                        style={{
+                                          padding: "0.5rem",
+                                          textAlign: "left",
+                                          borderBottom: "1px solid #ddd",
+                                          color: "#666",
+                                        }}
+                                      >
+                                        End
+                                      </th>
+                                      <th
+                                        style={{
+                                          padding: "0.5rem",
+                                          textAlign: "left",
+                                          borderBottom: "1px solid #ddd",
+                                          color: "#666",
+                                        }}
+                                      >
+                                        Hours
+                                      </th>
+                                      <th
+                                        style={{
+                                          padding: "0.5rem",
+                                          textAlign: "left",
+                                          borderBottom: "1px solid #ddd",
+                                          color: "#666",
+                                        }}
+                                      >
+                                        Route
+                                      </th>
+                                      <th
+                                        style={{
+                                          padding: "0.5rem",
+                                          textAlign: "left",
+                                          borderBottom: "1px solid #ddd",
+                                          color: "#666",
+                                        }}
+                                      >
+                                        Actions
+                                      </th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {driver.routes
+                                      .sort(
+                                        (a, b) =>
+                                          new Date(b.date || 0) -
+                                          new Date(a.date || 0)
+                                      )
+                                      .map((route, rIdx) => {
+                                        const spokeUrl = getSpokeUrl(
+                                          route.id,
+                                          route.planId
+                                        );
+                                        const dayKey = getDayKeyFromDateString(
+                                          route.date
+                                        );
+                                        const existingDayAdj =
+                                          dayKey &&
+                                          driver.adjustmentsByDay &&
+                                          driver.adjustmentsByDay[dayKey]
+                                            ? driver.adjustmentsByDay[dayKey]
+                                            : null;
+                                        return (
+                                          <tr
+                                            key={route.id || rIdx}
+                                            style={{
+                                              backgroundColor:
+                                                rIdx % 2 === 0
+                                                  ? "#fff"
+                                                  : "#f8fafc",
+                                            }}
+                                          >
+                                            <td
                                               style={{
-                                                padding: '0.25rem 0.5rem',
-                                                fontSize: '0.8rem',
-                                                color: '#fff',
-                                                backgroundColor: '#007bff',
-                                                border: 'none',
-                                                borderRadius: '4px',
-                                                cursor: 'pointer'
+                                                padding: "0.5rem",
+                                                borderBottom: "1px solid #eee",
                                               }}
                                             >
-                                              Adjust
-                                            </button>
-                                          </td>
-                                        </tr>
-                                      );
-                                    })}
-                                </tbody>
-                              </table>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
+                                              {formatDate(route.date)}
+                                            </td>
+                                            <td
+                                              style={{
+                                                padding: "0.5rem",
+                                                borderBottom: "1px solid #eee",
+                                              }}
+                                            >
+                                              {formatTime(route.startedAt)}
+                                            </td>
+                                            <td
+                                              style={{
+                                                padding: "0.5rem",
+                                                borderBottom: "1px solid #eee",
+                                              }}
+                                            >
+                                              {route.status ===
+                                              "in_progress" ? (
+                                                <span
+                                                  style={{ color: "#f0ad4e" }}
+                                                >
+                                                  -
+                                                </span>
+                                              ) : (
+                                                formatTime(route.completedAt)
+                                              )}
+                                            </td>
+                                            <td
+                                              style={{
+                                                padding: "0.5rem",
+                                                borderBottom: "1px solid #eee",
+                                              }}
+                                            >
+                                              {route.status ===
+                                              "in_progress" ? (
+                                                <span
+                                                  style={{
+                                                    color: "#f0ad4e",
+                                                    fontWeight: "500",
+                                                  }}
+                                                >
+                                                  In Progress
+                                                </span>
+                                              ) : route.status ===
+                                                "not_started" ? (
+                                                <span style={{ color: "#999" }}>
+                                                  Not Started
+                                                </span>
+                                              ) : route.hours !== null ? (
+                                                route.hours.toFixed(2)
+                                              ) : (
+                                                "-"
+                                              )}
+                                              {existingDayAdj &&
+                                                Number(
+                                                  existingDayAdj.hours || 0
+                                                ) !== 0 && (
+                                                  <div
+                                                    style={{
+                                                      fontSize: "0.8rem",
+                                                      color:
+                                                        existingDayAdj.hours > 0
+                                                          ? "#28a745"
+                                                          : "#dc3545",
+                                                    }}
+                                                  >
+                                                    Adj:{" "}
+                                                    {existingDayAdj.hours > 0
+                                                      ? "+"
+                                                      : ""}
+                                                    {Number(
+                                                      existingDayAdj.hours
+                                                    ).toFixed(2)}
+                                                    {existingDayAdj.reason
+                                                      ? ` (${existingDayAdj.reason})`
+                                                      : ""}
+                                                  </div>
+                                                )}
+                                            </td>
+                                            <td
+                                              style={{
+                                                padding: "0.5rem",
+                                                borderBottom: "1px solid #eee",
+                                              }}
+                                            >
+                                              {spokeUrl ? (
+                                                <a
+                                                  href={spokeUrl}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  onClick={(e) =>
+                                                    e.stopPropagation()
+                                                  }
+                                                  style={{
+                                                    color: "#007bff",
+                                                    textDecoration: "none",
+                                                    fontFamily: "monospace",
+                                                    fontSize: "0.85rem",
+                                                  }}
+                                                  onMouseOver={(e) =>
+                                                    (e.target.style.textDecoration =
+                                                      "underline")
+                                                  }
+                                                  onMouseOut={(e) =>
+                                                    (e.target.style.textDecoration =
+                                                      "none")
+                                                  }
+                                                >
+                                                  {route.routeTitle ||
+                                                    route.id.replace(
+                                                      "routes/",
+                                                      ""
+                                                    )}{" "}
+                                                  ↗
+                                                </a>
+                                              ) : (
+                                                <span
+                                                  style={{
+                                                    fontFamily: "monospace",
+                                                    fontSize: "0.85rem",
+                                                    color: "#666",
+                                                  }}
+                                                >
+                                                  {route.id}
+                                                </span>
+                                              )}
+                                            </td>
+                                            <td
+                                              style={{
+                                                padding: "0.5rem",
+                                                borderBottom: "1px solid #eee",
+                                              }}
+                                            >
+                                              <button
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  if (!dayKey) {
+                                                    alert(
+                                                      "Could not determine date for this route."
+                                                    );
+                                                    return;
+                                                  }
+                                                  setSelectedDriver(driver);
+                                                  setSelectedDayKey(dayKey);
+                                                  setAdjustmentHours(
+                                                    existingDayAdj
+                                                      ? String(
+                                                          existingDayAdj.hours
+                                                        )
+                                                      : ""
+                                                  );
+                                                  setAdjustmentReason(
+                                                    existingDayAdj
+                                                      ? existingDayAdj.reason ||
+                                                          ""
+                                                      : ""
+                                                  );
+                                                }}
+                                                style={{
+                                                  padding: "0.25rem 0.5rem",
+                                                  fontSize: "0.8rem",
+                                                  color: "#fff",
+                                                  backgroundColor: "#007bff",
+                                                  border: "none",
+                                                  borderRadius: "4px",
+                                                  cursor: "pointer",
+                                                }}
+                                              >
+                                                Adjust
+                                              </button>
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
                     </Fragment>
                   ))}
                 </tbody>
@@ -760,94 +1226,121 @@ export default function AdminDashboard() {
 
       {/* Adjustment Modal */}
       {selectedDriver && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
-        }}>
-          <div style={{
-            backgroundColor: '#fff',
-            padding: '2rem',
-            borderRadius: '8px',
-            maxWidth: 500,
-            width: '90%'
-          }}>
-            <h3 style={{ marginTop: 0 }}>Adjust Hours for {selectedDriver.displayName}</h3>
-            <p style={{ color: '#666' }}>
-              <strong>Date:</strong> {selectedDayKey || '-'}<br />
-              {selectedDayKey && selectedDriver.adjustmentsByDay && selectedDriver.adjustmentsByDay[selectedDayKey] && (
-                <>
-                  <strong>Current adjustment:</strong> {selectedDriver.adjustmentsByDay[selectedDayKey].hours > 0 ? '+' : ''}{Number(selectedDriver.adjustmentsByDay[selectedDayKey].hours).toFixed(2)}
-                  {selectedDriver.adjustmentsByDay[selectedDayKey].reason ? ` (${selectedDriver.adjustmentsByDay[selectedDayKey].reason})` : ''}
-                  <br />
-                </>
-              )}
-              <small>Adjustments apply to this specific date (YYYY-MM-DD).</small>
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: "#fff",
+              padding: "2rem",
+              borderRadius: "8px",
+              maxWidth: 500,
+              width: "90%",
+            }}
+          >
+            <h3 style={{ marginTop: 0 }}>
+              Adjust Hours for {selectedDriver.displayName}
+            </h3>
+            <p style={{ color: "#666" }}>
+              <strong>Date:</strong> {selectedDayKey || "-"}
+              <br />
+              {selectedDayKey &&
+                selectedDriver.adjustmentsByDay &&
+                selectedDriver.adjustmentsByDay[selectedDayKey] && (
+                  <>
+                    <strong>Current adjustment:</strong>{" "}
+                    {selectedDriver.adjustmentsByDay[selectedDayKey].hours > 0
+                      ? "+"
+                      : ""}
+                    {Number(
+                      selectedDriver.adjustmentsByDay[selectedDayKey].hours
+                    ).toFixed(2)}
+                    {selectedDriver.adjustmentsByDay[selectedDayKey].reason
+                      ? ` (${selectedDriver.adjustmentsByDay[selectedDayKey].reason})`
+                      : ""}
+                    <br />
+                  </>
+                )}
+              <small>
+                Adjustments apply to this specific date (YYYY-MM-DD).
+              </small>
             </p>
 
-            <label style={{ display: 'block', marginBottom: '1rem' }}>
+            <label style={{ display: "block", marginBottom: "1rem" }}>
               <strong>New Adjustment (hours):</strong>
               <input
                 type="number"
                 step="0.01"
                 value={adjustmentHours}
-                onChange={e => setAdjustmentHours(e.target.value)}
+                onChange={(e) => setAdjustmentHours(e.target.value)}
                 placeholder="e.g., 2 or -1.5"
                 style={{
-                  width: '100%',
-                  padding: '0.5rem',
-                  fontSize: '1rem',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  marginTop: '0.25rem',
-                  boxSizing: 'border-box'
+                  width: "100%",
+                  padding: "0.5rem",
+                  fontSize: "1rem",
+                  border: "1px solid #ddd",
+                  borderRadius: "4px",
+                  marginTop: "0.25rem",
+                  boxSizing: "border-box",
                 }}
               />
-              <small style={{ color: '#666' }}>
-                This replaces any existing adjustment for this date. Use positive numbers to add hours, negative to subtract. Enter 0 to remove adjustment.
+              <small style={{ color: "#666" }}>
+                This replaces any existing adjustment for this date. Use
+                positive numbers to add hours, negative to subtract. Enter 0 to
+                remove adjustment.
               </small>
             </label>
 
-            <label style={{ display: 'block', marginBottom: '1rem' }}>
+            <label style={{ display: "block", marginBottom: "1rem" }}>
               <strong>Reason:</strong>
               <input
                 type="text"
                 value={adjustmentReason}
-                onChange={e => setAdjustmentReason(e.target.value)}
+                onChange={(e) => setAdjustmentReason(e.target.value)}
                 placeholder="e.g., Overtime on bank holiday"
                 style={{
-                  width: '100%',
-                  padding: '0.5rem',
-                  fontSize: '1rem',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  marginTop: '0.25rem',
-                  boxSizing: 'border-box'
+                  width: "100%",
+                  padding: "0.5rem",
+                  fontSize: "1rem",
+                  border: "1px solid #ddd",
+                  borderRadius: "4px",
+                  marginTop: "0.25rem",
+                  boxSizing: "border-box",
                 }}
               />
             </label>
 
-            <div style={{ display: 'flex', gap: '1rem' }}>
+            <div style={{ display: "flex", gap: "1rem" }}>
               <button
                 onClick={submitAdjustment}
-                disabled={adjustmentHours === '' || !selectedDayKey}
+                disabled={adjustmentHours === "" || !selectedDayKey}
                 style={{
                   flex: 1,
-                  padding: '0.75rem',
-                  fontSize: '1rem',
-                  fontWeight: '600',
-                  color: '#fff',
-                  backgroundColor: (adjustmentHours === '' || !selectedDayKey) ? '#ccc' : '#28a745',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: (adjustmentHours === '' || !selectedDayKey) ? 'not-allowed' : 'pointer'
+                  padding: "0.75rem",
+                  fontSize: "1rem",
+                  fontWeight: "600",
+                  color: "#fff",
+                  backgroundColor:
+                    adjustmentHours === "" || !selectedDayKey
+                      ? "#ccc"
+                      : "#28a745",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor:
+                    adjustmentHours === "" || !selectedDayKey
+                      ? "not-allowed"
+                      : "pointer",
                 }}
               >
                 Save Adjustment
@@ -855,20 +1348,20 @@ export default function AdminDashboard() {
               <button
                 onClick={() => {
                   setSelectedDriver(null);
-                  setSelectedDayKey('');
-                  setAdjustmentHours('');
-                  setAdjustmentReason('');
+                  setSelectedDayKey("");
+                  setAdjustmentHours("");
+                  setAdjustmentReason("");
                 }}
                 style={{
                   flex: 1,
-                  padding: '0.75rem',
-                  fontSize: '1rem',
-                  fontWeight: '600',
-                  color: '#666',
-                  backgroundColor: '#fff',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  cursor: 'pointer'
+                  padding: "0.75rem",
+                  fontSize: "1rem",
+                  fontWeight: "600",
+                  color: "#666",
+                  backgroundColor: "#fff",
+                  border: "1px solid #ddd",
+                  borderRadius: "4px",
+                  cursor: "pointer",
                 }}
               >
                 Cancel
