@@ -58,6 +58,7 @@ export default async function handler(req, res) {
       adjustment: adjusted.totalAdjustment,
       adjustmentReason: Object.keys(adjusted.adjustmentsByDay || {}).length > 1 ? 'Multiple adjustments' : (Object.values(adjusted.adjustmentsByDay || {})[0]?.reason || ''),
       adjustmentsByDay: adjusted.adjustmentsByDay || {},
+      flaggedDays: adjusted.flaggedDays || {},
       rate: payRate,
       pay,
       details: sortedDetails,

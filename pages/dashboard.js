@@ -625,6 +625,9 @@ export default function Dashboard() {
               <tbody>
                 {data.details.map((d, idx) => {
                   const spokeUrl = getSpokeUrl(d.id, d.planId);
+                  const dayKey = getDayKeyFromDateString(d.date);
+                  const isRouteFlagged = dayKey && data.flaggedDays && data.flaggedDays[dayKey]?.flagged;
+                  const routeFlagReason = dayKey && data.flaggedDays && data.flaggedDays[dayKey]?.flagReason;
                   return (
                     <tr
                       key={d.id}
@@ -638,7 +641,21 @@ export default function Dashboard() {
                           borderBottom: "1px solid #eee",
                         }}
                       >
-                        {formatDate(d.date)}
+                        <span style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
+                          {isRouteFlagged && (
+                            <span
+                              title={routeFlagReason || "Under review"}
+                              style={{
+                                color: "#f0ad4e",
+                                cursor: "help",
+                                fontSize: "1rem",
+                              }}
+                            >
+                              &#9888;
+                            </span>
+                          )}
+                          {formatDate(d.date)}
+                        </span>
                       </td>
                       <td
                         style={{

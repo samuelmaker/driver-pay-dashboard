@@ -56,6 +56,7 @@ export default async function handler(req, res) {
         adjustment: adjusted.totalAdjustment,
         adjustmentReason: reasonSummary,
         adjustmentsByDay: adjusted.adjustmentsByDay || {},
+        flaggedDays: adjusted.flaggedDays || {},
         rate: payRate,
         pay,
         routeCount: driverData.details.length,

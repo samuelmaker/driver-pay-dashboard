@@ -25,6 +25,34 @@ function formatTime(timestampSeconds) {
   });
 }
 
+function formatTimeForInput(timestampSeconds) {
+  if (!timestampSeconds) return "";
+  const date = new Date(timestampSeconds * 1000);
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
+
+function parseTimeInputToTimestamp(timeString, dayKey) {
+  if (!timeString || !dayKey) return null;
+  const [hours, minutes] = timeString.split(":").map(Number);
+  if (isNaN(hours) || isNaN(minutes)) return null;
+  // Create date from dayKey (YYYY-MM-DD) at the specified time
+  const date = new Date(`${dayKey}T${timeString}:00`);
+  return Math.floor(date.getTime() / 1000);
+}
+
+function calculateHoursFromTimes(startTimeStr, endTimeStr) {
+  if (!startTimeStr || !endTimeStr) return null;
+  const [startHours, startMinutes] = startTimeStr.split(":").map(Number);
+  const [endHours, endMinutes] = endTimeStr.split(":").map(Number);
+  if (isNaN(startHours) || isNaN(endHours)) return null;
+  const startTotalMinutes = startHours * 60 + startMinutes;
+  const endTotalMinutes = endHours * 60 + endMinutes;
+  const diffMinutes = endTotalMinutes - startTotalMinutes;
+  return diffMinutes / 60;
+}
+
 function formatDayKeyLikeRouteDate(dayKey) {
   if (!dayKey || typeof dayKey !== "string") return "-";
   try {
@@ -109,6 +137,14 @@ export default function AdminDashboard() {
   const [adjustmentReason, setAdjustmentReason] = useState("");
   const [selectedDayKey, setSelectedDayKey] = useState("");
   const [selectedMonth, setSelectedMonth] = useState("");
+  // Time-based adjustment state
+  const [adjustedStartTime, setAdjustedStartTime] = useState("");
+  const [adjustedEndTime, setAdjustedEndTime] = useState("");
+  const [originalStartTime, setOriginalStartTime] = useState(null);
+  const [originalEndTime, setOriginalEndTime] = useState(null);
+  // Flag state
+  const [isFlagged, setIsFlagged] = useState(false);
+  const [flagReason, setFlagReason] = useState("");
 
   function getDayKeyFromDateString(dateString) {
     if (!dateString) return "";
@@ -167,28 +203,111 @@ export default function AdminDashboard() {
   }
 
   async function submitAdjustment() {
-    if (!selectedDriver || !selectedDayKey || adjustmentHours === "") return;
+    if (!selectedDriver || !selectedDayKey) return;
+
+    // Build request body based on what's being submitted
+    const body = {
+      username: selectedDriver.username,
+      dayKey: selectedDayKey,
+      reason: adjustmentReason,
+      flagged: isFlagged,
+      flagReason: isFlagged ? flagReason : null,
+    };
+
+    // Check if times have been changed from original (for time-based adjustment)
+    const startChanged = adjustedStartTime &&
+      formatTimeForInput(originalStartTime) !== adjustedStartTime;
+    const endChanged = adjustedEndTime &&
+      formatTimeForInput(originalEndTime) !== adjustedEndTime;
+    const timesChanged = startChanged || endChanged;
+
+    // Check if we have time-based adjustment (only if times were actually changed)
+    if (timesChanged && adjustedStartTime && adjustedEndTime) {
+      body.actionType = "time";
+      body.adjustedStartTime = parseTimeInputToTimestamp(adjustedStartTime, selectedDayKey);
+      body.adjustedEndTime = parseTimeInputToTimestamp(adjustedEndTime, selectedDayKey);
+      body.originalStartTime = originalStartTime;
+      body.originalEndTime = originalEndTime;
+    } else if (adjustmentHours !== "") {
+      // Legacy hour-based adjustment
+      body.adjustment = parseFloat(adjustmentHours);
+    } else if (isFlagged !== undefined) {
+      // Flag-only update (even if isFlagged is false - to allow unflagging)
+      body.actionType = "flag";
+    } else {
+      return; // Nothing to submit
+    }
 
     const res = await fetch("/api/admin/adjust-hours", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: selectedDriver.username,
-        dayKey: selectedDayKey,
-        adjustment: parseFloat(adjustmentHours),
-        reason: adjustmentReason,
-      }),
+      body: JSON.stringify(body),
     });
 
     if (res.ok) {
-      setSelectedDriver(null);
-      setSelectedDayKey("");
-      setAdjustmentHours("");
-      setAdjustmentReason("");
+      closeAdjustmentModal();
       loadAllDrivers(selectedMonth);
     } else {
       const error = await res.json();
       alert("Error: " + error.error);
+    }
+  }
+
+  function closeAdjustmentModal() {
+    setSelectedDriver(null);
+    setSelectedDayKey("");
+    setAdjustmentHours("");
+    setAdjustmentReason("");
+    setAdjustedStartTime("");
+    setAdjustedEndTime("");
+    setOriginalStartTime(null);
+    setOriginalEndTime(null);
+    setIsFlagged(false);
+    setFlagReason("");
+  }
+
+  function openAdjustmentModal(driver, route) {
+    const dayKey = getDayKeyFromDateString(route.date);
+    if (!dayKey) {
+      alert("Could not determine date for this route.");
+      return;
+    }
+
+    setSelectedDriver(driver);
+    setSelectedDayKey(dayKey);
+
+    // Set original times from route
+    setOriginalStartTime(route.startedAt || null);
+    setOriginalEndTime(route.completedAt || null);
+
+    // Check for existing adjustment
+    const existingAdj = driver.adjustmentsByDay?.[dayKey];
+    if (existingAdj) {
+      setAdjustmentReason(existingAdj.reason || "");
+      if (existingAdj.adjustmentType === "time") {
+        setAdjustedStartTime(formatTimeForInput(existingAdj.adjustedStartTime));
+        setAdjustedEndTime(formatTimeForInput(existingAdj.adjustedEndTime));
+        setAdjustmentHours("");
+      } else {
+        setAdjustmentHours(String(existingAdj.hours || ""));
+        setAdjustedStartTime(formatTimeForInput(route.startedAt));
+        setAdjustedEndTime(formatTimeForInput(route.completedAt));
+      }
+    } else {
+      setAdjustmentHours("");
+      setAdjustmentReason("");
+      setAdjustedStartTime(formatTimeForInput(route.startedAt));
+      setAdjustedEndTime(formatTimeForInput(route.completedAt));
+    }
+
+    // Check for existing flag
+    const existingFlag = driver.flaggedDays?.[dayKey];
+    if (existingFlag) {
+      setIsFlagged(true);
+      setFlagReason(existingFlag.flagReason || "");
+    } else {
+      setIsFlagged(false);
+      setFlagReason("");
     }
   }
 
@@ -1019,6 +1138,14 @@ export default function AdminDashboard() {
                                           driver.adjustmentsByDay[dayKey]
                                             ? driver.adjustmentsByDay[dayKey]
                                             : null;
+                                        const isRouteFlagged =
+                                          dayKey &&
+                                          driver.flaggedDays &&
+                                          driver.flaggedDays[dayKey]?.flagged;
+                                        const routeFlagReason =
+                                          dayKey &&
+                                          driver.flaggedDays &&
+                                          driver.flaggedDays[dayKey]?.flagReason;
                                         return (
                                           <tr
                                             key={route.id || rIdx}
@@ -1035,7 +1162,21 @@ export default function AdminDashboard() {
                                                 borderBottom: "1px solid #eee",
                                               }}
                                             >
-                                              {formatDate(route.date)}
+                                              <span style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
+                                                {isRouteFlagged && (
+                                                  <span
+                                                    title={routeFlagReason || "Flagged for review"}
+                                                    style={{
+                                                      color: "#f0ad4e",
+                                                      cursor: "help",
+                                                      fontSize: "1rem",
+                                                    }}
+                                                  >
+                                                    &#9888;
+                                                  </span>
+                                                )}
+                                                {formatDate(route.date)}
+                                              </span>
                                             </td>
                                             <td
                                               style={{
@@ -1171,27 +1312,7 @@ export default function AdminDashboard() {
                                               <button
                                                 onClick={(e) => {
                                                   e.stopPropagation();
-                                                  if (!dayKey) {
-                                                    alert(
-                                                      "Could not determine date for this route."
-                                                    );
-                                                    return;
-                                                  }
-                                                  setSelectedDriver(driver);
-                                                  setSelectedDayKey(dayKey);
-                                                  setAdjustmentHours(
-                                                    existingDayAdj
-                                                      ? String(
-                                                          existingDayAdj.hours
-                                                        )
-                                                      : ""
-                                                  );
-                                                  setAdjustmentReason(
-                                                    existingDayAdj
-                                                      ? existingDayAdj.reason ||
-                                                          ""
-                                                      : ""
-                                                  );
+                                                  openAdjustmentModal(driver, route);
                                                 }}
                                                 style={{
                                                   padding: "0.25rem 0.5rem",
@@ -1247,38 +1368,87 @@ export default function AdminDashboard() {
               borderRadius: "8px",
               maxWidth: 500,
               width: "90%",
+              maxHeight: "90vh",
+              overflowY: "auto",
             }}
           >
             <h3 style={{ marginTop: 0 }}>
               Adjust Hours for {selectedDriver.displayName}
             </h3>
-            <p style={{ color: "#666" }}>
-              <strong>Date:</strong> {selectedDayKey || "-"}
+            <p style={{ color: "#666", marginBottom: "1.5rem" }}>
+              <strong>Date:</strong> {formatDayKeyLikeRouteDate(selectedDayKey)}
               <br />
-              {selectedDayKey &&
-                selectedDriver.adjustmentsByDay &&
-                selectedDriver.adjustmentsByDay[selectedDayKey] && (
-                  <>
-                    <strong>Current adjustment:</strong>{" "}
-                    {selectedDriver.adjustmentsByDay[selectedDayKey].hours > 0
-                      ? "+"
-                      : ""}
-                    {Number(
-                      selectedDriver.adjustmentsByDay[selectedDayKey].hours
-                    ).toFixed(2)}
-                    {selectedDriver.adjustmentsByDay[selectedDayKey].reason
-                      ? ` (${selectedDriver.adjustmentsByDay[selectedDayKey].reason})`
-                      : ""}
-                    <br />
-                  </>
-                )}
               <small>
-                Adjustments apply to this specific date (YYYY-MM-DD).
+                Adjust times or add/subtract hours for this date.
               </small>
             </p>
 
-            <label style={{ display: "block", marginBottom: "1rem" }}>
-              <strong>New Adjustment (hours):</strong>
+            {/* Time-based adjustment */}
+            <div style={{ marginBottom: "1.5rem", padding: "1rem", backgroundColor: "#f8fafc", borderRadius: "4px" }}>
+              <strong style={{ display: "block", marginBottom: "0.75rem" }}>Time Adjustment</strong>
+
+              <div style={{ display: "flex", gap: "1rem", marginBottom: "0.5rem" }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: "block", fontSize: "0.85rem", color: "#666", marginBottom: "0.25rem" }}>
+                    Original Start: {formatTime(originalStartTime)}
+                  </label>
+                  <label style={{ display: "block", fontSize: "0.85rem", marginBottom: "0.25rem" }}>
+                    Adjusted Start:
+                  </label>
+                  <input
+                    type="time"
+                    value={adjustedStartTime}
+                    onChange={(e) => setAdjustedStartTime(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "0.5rem",
+                      fontSize: "1rem",
+                      border: "1px solid #ddd",
+                      borderRadius: "4px",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: "block", fontSize: "0.85rem", color: "#666", marginBottom: "0.25rem" }}>
+                    Original End: {formatTime(originalEndTime)}
+                  </label>
+                  <label style={{ display: "block", fontSize: "0.85rem", marginBottom: "0.25rem" }}>
+                    Adjusted End:
+                  </label>
+                  <input
+                    type="time"
+                    value={adjustedEndTime}
+                    onChange={(e) => setAdjustedEndTime(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "0.5rem",
+                      fontSize: "1rem",
+                      border: "1px solid #ddd",
+                      borderRadius: "4px",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+              </div>
+
+              {adjustedStartTime && adjustedEndTime && (
+                <div style={{ fontSize: "0.9rem", color: "#007bff", marginTop: "0.5rem" }}>
+                  <strong>Adjusted Hours:</strong> {calculateHoursFromTimes(adjustedStartTime, adjustedEndTime)?.toFixed(2) || "-"} hrs
+                  {originalStartTime && originalEndTime && (
+                    <span style={{ marginLeft: "0.5rem", color: "#666" }}>
+                      (Original: {((originalEndTime - originalStartTime) / 3600).toFixed(2)} hrs)
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Legacy hour adjustment (collapsed by default if times are set) */}
+            <details style={{ marginBottom: "1rem" }} open={!adjustedStartTime && !adjustedEndTime}>
+              <summary style={{ cursor: "pointer", fontWeight: "600", marginBottom: "0.5rem" }}>
+                Manual Hour Adjustment
+              </summary>
               <input
                 type="number"
                 step="0.01"
@@ -1295,12 +1465,11 @@ export default function AdminDashboard() {
                   boxSizing: "border-box",
                 }}
               />
-              <small style={{ color: "#666" }}>
-                This replaces any existing adjustment for this date. Use
-                positive numbers to add hours, negative to subtract. Enter 0 to
-                remove adjustment.
+              <small style={{ color: "#666", display: "block", marginTop: "0.25rem" }}>
+                Use this for manual hour adjustments instead of time-based adjustments.
+                Positive adds hours, negative subtracts. Enter 0 to clear.
               </small>
-            </label>
+            </details>
 
             <label style={{ display: "block", marginBottom: "1rem" }}>
               <strong>Reason:</strong>
@@ -1321,37 +1490,58 @@ export default function AdminDashboard() {
               />
             </label>
 
+            {/* Flag section */}
+            <div style={{ marginBottom: "1.5rem", padding: "1rem", backgroundColor: isFlagged ? "#fff3cd" : "#f8fafc", borderRadius: "4px", border: isFlagged ? "1px solid #f0ad4e" : "1px solid #eee" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", marginBottom: "0.5rem" }}>
+                <input
+                  type="checkbox"
+                  checked={isFlagged}
+                  onChange={(e) => setIsFlagged(e.target.checked)}
+                  style={{ width: "1rem", height: "1rem" }}
+                />
+                <span style={{ fontWeight: "600" }}>
+                  <span style={{ color: "#f0ad4e", marginRight: "0.25rem" }}>&#9888;</span>
+                  Flag this day for review
+                </span>
+              </label>
+              {isFlagged && (
+                <input
+                  type="text"
+                  value={flagReason}
+                  onChange={(e) => setFlagReason(e.target.value)}
+                  placeholder="Reason for flagging (visible to driver)"
+                  style={{
+                    width: "100%",
+                    padding: "0.5rem",
+                    fontSize: "0.9rem",
+                    border: "1px solid #ddd",
+                    borderRadius: "4px",
+                    boxSizing: "border-box",
+                  }}
+                />
+              )}
+            </div>
+
             <div style={{ display: "flex", gap: "1rem" }}>
               <button
                 onClick={submitAdjustment}
-                disabled={adjustmentHours === "" || !selectedDayKey}
+                disabled={!selectedDayKey}
                 style={{
                   flex: 1,
                   padding: "0.75rem",
                   fontSize: "1rem",
                   fontWeight: "600",
                   color: "#fff",
-                  backgroundColor:
-                    adjustmentHours === "" || !selectedDayKey
-                      ? "#ccc"
-                      : "#28a745",
+                  backgroundColor: !selectedDayKey ? "#ccc" : "#28a745",
                   border: "none",
                   borderRadius: "4px",
-                  cursor:
-                    adjustmentHours === "" || !selectedDayKey
-                      ? "not-allowed"
-                      : "pointer",
+                  cursor: !selectedDayKey ? "not-allowed" : "pointer",
                 }}
               >
-                Save Adjustment
+                Save
               </button>
               <button
-                onClick={() => {
-                  setSelectedDriver(null);
-                  setSelectedDayKey("");
-                  setAdjustmentHours("");
-                  setAdjustmentReason("");
-                }}
+                onClick={closeAdjustmentModal}
                 style={{
                   flex: 1,
                   padding: "0.75rem",

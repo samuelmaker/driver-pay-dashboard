@@ -5,5 +5,19 @@
       "reason": "overtime",
       "updatedAt": "2026-01-31T18:53:17.739Z"
     }
+  },
+  "andrew": {
+    "2026-02-22": {
+      "adjustedStartTime": 1771750320,
+      "adjustedEndTime": 1771789680,
+      "originalStartTime": 1771750349,
+      "originalEndTime": 1771789689,
+      "hours": 0.01,
+      "reason": "",
+      "updatedAt": "2026-02-25T22:13:36.051Z",
+      "adjustmentType": "time",
+      "flagged": true,
+      "flagReason": null
+    }
   }
 }

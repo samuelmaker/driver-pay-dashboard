@@ -1,6 +1,6 @@
 import { verify } from 'jsonwebtoken';
 const { isAdmin } = require('../../../lib/driver-mapping');
-const { setAdjustment } = require('../../../lib/adjustments');
+const { setAdjustment, setTimeAdjustment, setFlag } = require('../../../lib/adjustments');
 
 function requireAuth(req) {
   const cookie = req.headers.cookie || '';
@@ -20,22 +20,77 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Admin access required' });
   }
 
-  const { username, dayKey, adjustment, reason } = req.body;
+  const {
+    username,
+    dayKey,
+    // Legacy hour adjustment
+    adjustment,
+    reason,
+    // Time-based adjustment
+    adjustedStartTime,
+    adjustedEndTime,
+    originalStartTime,
+    originalEndTime,
+    // Flag
+    flagged,
+    flagReason,
+    // Action type to distinguish operations
+    actionType,
+  } = req.body;
 
-  if (!username || !dayKey || adjustment === undefined) {
+  if (!username || !dayKey) {
     return res.status(400).json({
-      error: 'Missing required fields: username, dayKey, adjustment'
+      error: 'Missing required fields: username, dayKey'
     });
   }
 
   try {
-    const success = setAdjustment(username, dayKey, parseFloat(adjustment), reason || '');
+    let success = false;
+    let message = '';
+
+    // Handle flag-only update
+    if (actionType === 'flag') {
+      success = setFlag(username, dayKey, !!flagged, flagReason || null);
+      message = flagged
+        ? `Day ${dayKey} flagged for ${username}`
+        : `Flag removed for ${username} on ${dayKey}`;
+    }
+    // Handle time-based adjustment
+    else if (actionType === 'time' || (adjustedStartTime !== undefined || adjustedEndTime !== undefined)) {
+      success = setTimeAdjustment(
+        username,
+        dayKey,
+        adjustedStartTime ?? null,
+        adjustedEndTime ?? null,
+        originalStartTime ?? null,
+        originalEndTime ?? null,
+        reason || ''
+      );
+      message = `Time adjustment set for ${username} on ${dayKey}`;
+
+      // Also handle flag if provided
+      if (flagged !== undefined) {
+        setFlag(username, dayKey, !!flagged, flagReason || null);
+      }
+    }
+    // Handle legacy hour adjustment
+    else if (adjustment !== undefined) {
+      success = setAdjustment(username, dayKey, parseFloat(adjustment), reason || '');
+      message = `Adjustment of ${adjustment} hours set for ${username} on ${dayKey}`;
+
+      // Also handle flag if provided
+      if (flagged !== undefined) {
+        setFlag(username, dayKey, !!flagged, flagReason || null);
+      }
+    }
+    else {
+      return res.status(400).json({
+        error: 'Missing adjustment data: provide adjustment, time fields, or flag'
+      });
+    }
 
     if (success) {
-      return res.json({
-        success: true,
-        message: `Adjustment of ${adjustment} hours set for ${username} on ${dayKey}`
-      });
+      return res.json({ success: true, message });
     } else {
       return res.status(500).json({ error: 'Failed to save adjustment' });
     }
