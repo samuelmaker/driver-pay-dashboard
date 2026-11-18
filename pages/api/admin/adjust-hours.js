@@ -1,13 +1,6 @@
-import { verify } from 'jsonwebtoken';
+const { requireAuth } = require('../../../lib/session');
 const { isAdmin } = require('../../../lib/driver-mapping');
-const { setAdjustment, setTimeAdjustment, setFlag } = require('../../../lib/adjustments');
-
-function requireAuth(req) {
-  const cookie = req.headers.cookie || '';
-  const match = cookie.match(/soda_session=([^;]+)/);
-  if (!match) return null;
-  try { return verify(match[1], process.env.JWT_SECRET || 'dev-secret'); } catch (e) { return null; }
-}
+const { isValidUsername, setAdjustment, setTimeAdjustment, setFlag } = require('../../../lib/adjustments');
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -38,7 +31,7 @@ export default async function handler(req, res) {
     actionType,
   } = req.body;
 
-  if (!username || !dayKey) {
+  if (!isValidUsername(username) || !dayKey) {
     return res.status(400).json({
       error: 'Missing required fields: username, dayKey'
     });

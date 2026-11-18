@@ -1,21 +1,29 @@
-import { sign } from 'jsonwebtoken';
+const { createHash, timingSafeEqual } = require('crypto');
+const { createSession, getSessionSecret } = require('../../../lib/session');
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
   const { username, pin } = req.body || {};
-  if (!username || !pin) return res.status(400).json({ error: 'username and pin required' });
+  if (typeof username !== 'string' || typeof pin !== 'string' || !username || !/^\d{6}$/.test(pin)) {
+    return res.status(400).json({ error: 'username and six-digit pin required' });
+  }
+  try { getSessionSecret(); } catch {
+    return res.status(503).json({ error: 'Authentication is not configured' });
+  }
 
   // Load pins from env (server-only)
   const pinStoreJson = process.env.PIN_STORE_JSON || '{}';
   let pins = {};
   try { pins = JSON.parse(pinStoreJson); } catch (e) { return res.status(500).json({ error: 'invalid PIN_STORE_JSON' }); }
 
-  const expected = pins[username];
-  if (!expected) return res.status(401).json({ error: 'unknown user' });
-  if (expected !== pin) return res.status(401).json({ error: 'invalid pin' });
+  const expected = pins && Object.hasOwn(pins, username) ? pins[username] : null;
+  const digest = value => createHash('sha256').update(value).digest();
+  if (typeof expected !== 'string' || !timingSafeEqual(digest(expected), digest(pin))) {
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
 
   // issue JWT (short TTL)
-  const token = sign({ username }, process.env.JWT_SECRET || 'dev-secret', { expiresIn: '8h' });
+  const token = createSession(username);
 
   // Build secure cookie string
   const isProduction = process.env.NODE_ENV === 'production';
