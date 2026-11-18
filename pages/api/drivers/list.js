@@ -7,9 +7,8 @@ export default async function handler(req, res) {
   try {
     pins = JSON.parse(pinStoreJson);
   } catch (e) {
-    console.error('Failed to parse PIN_STORE_JSON:', e.message);
-    console.error('PIN_STORE_JSON value:', pinStoreJson);
-    return res.status(500).json({ error: 'invalid PIN_STORE_JSON', details: e.message });
+    console.error('Failed to parse PIN_STORE_JSON');
+    return res.status(500).json({ error: 'invalid PIN_STORE_JSON' });
   }
 
   const driverNames = Object.keys(pins).sort();

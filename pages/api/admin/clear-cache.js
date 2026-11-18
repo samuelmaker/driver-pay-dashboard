@@ -1,17 +1,6 @@
-import { verify } from "jsonwebtoken";
+const { requireAuth } = require('../../../lib/session');
 const { isAdmin } = require("../../../lib/driver-mapping");
 const { clearCache, getCacheStats } = require("../../../lib/spoke-api");
-
-function requireAuth(req) {
-  const cookie = req.headers.cookie || "";
-  const match = cookie.match(/soda_session=([^;]+)/);
-  if (!match) return null;
-  try {
-    return verify(match[1], process.env.JWT_SECRET || "dev-secret");
-  } catch (e) {
-    return null;
-  }
-}
 
 export default async function handler(req, res) {
   const session = requireAuth(req);
